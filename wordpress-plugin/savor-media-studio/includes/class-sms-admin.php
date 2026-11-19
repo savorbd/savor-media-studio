@@ -29,7 +29,7 @@ class SMS_Admin {
 		$r     = SMS_Translate::translate(array(
 			array('id' => 'a', 'text' => 'Chief Guest: Mr. Md. Anwar Hossain, Hon\'ble Minister, Ministry of Shipping'),
 			array('id' => 'b', 'text' => 'The exhibition will remain open from 10:00 AM to 7:00 PM.'),
-		), 'fields', $pid, 55);
+		), 'fields', $pid, 110);
 		$secs = round(microtime(true) - $start, 1);
 		if (is_wp_error($r)) {
 			wp_send_json_error(array('message' => $label . ' is not working right now: ' . $r->get_error_message(), 'seconds' => $secs));
@@ -208,7 +208,7 @@ class SMS_Admin {
 						}
 						btn.disabled = true; btn.textContent = 'Testing…';
 						box.style.display = 'block'; box.style.borderLeftColor = '#72aee6';
-						box.textContent = 'Asking the AI to translate a sample (up to about a minute)…';
+						box.textContent = 'Asking the AI to translate a sample (Gemini can take up to a minute or two when it is busy)…';
 						var body = new FormData(); body.append('action', 'sms_test_ai'); body.append('nonce', nonce); body.append('provider', pid);
 						fetch(ajax, { method: 'POST', body: body, credentials: 'same-origin' })
 							.then(function (r) { return r.json(); })
