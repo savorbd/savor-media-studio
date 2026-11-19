@@ -46,6 +46,8 @@ function sms_settings() {
 		'anthropic_model'  => '',
 		'openai_key'       => '',
 		'openai_model'     => '',
+		'openrouter_key'   => '',
+		'openrouter_model' => '',
 		'mcp_enabled'      => false,
 		'mcp_token'        => '',
 	);

@@ -55,7 +55,7 @@ class SMS_Admin {
 				delete_option('sms_model_found_' . $p); // a new key may have different models
 			}
 			$out[$p . '_key']   = $key;
-			$out[$p . '_model'] = isset($input[$p . '_model']) ? preg_replace('/[^a-z0-9.\-_:]/i', '', wp_unslash($input[$p . '_model'])) : '';
+			$out[$p . '_model'] = isset($input[$p . '_model']) ? preg_replace('/[^a-z0-9.\-_:\/,]/i', '', wp_unslash($input[$p . '_model'])) : '';
 		}
 		return $out;
 	}
@@ -126,7 +126,7 @@ class SMS_Admin {
 							<p class="description">Default AI for translation. Every provider with a key can also be picked inside the studio. Without any key, the studio uses Offline translation only. Keys are only shown here to administrators; the studio never sends them to the browser.</p>
 						</td>
 					</tr>
-					<?php foreach (array('gemini' => array('Google Gemini', 'aistudio.google.com', 'SMS_GEMINI_API_KEY'), 'anthropic' => array('Anthropic Claude', 'console.anthropic.com', 'SMS_ANTHROPIC_API_KEY'), 'openai' => array('OpenAI ChatGPT', 'platform.openai.com', 'SMS_OPENAI_API_KEY')) as $pid => $info) : ?>
+					<?php foreach (array('gemini' => array('Google Gemini', 'aistudio.google.com', 'SMS_GEMINI_API_KEY'), 'anthropic' => array('Anthropic Claude', 'console.anthropic.com', 'SMS_ANTHROPIC_API_KEY'), 'openai' => array('OpenAI ChatGPT', 'platform.openai.com', 'SMS_OPENAI_API_KEY'), 'openrouter' => array('OpenRouter (free models)', 'openrouter.ai/keys', 'SMS_OPENROUTER_API_KEY')) as $pid => $info) : ?>
 					<tr>
 						<th scope="row"><label for="sms-<?php echo esc_attr($pid); ?>-key"><?php echo esc_html($info[0]); ?></label></th>
 						<td>
@@ -138,7 +138,14 @@ class SMS_Admin {
 							<?php if (SMS_Translate::key($pid)) : ?>
 								<a class="button" style="margin-left:6px" href="<?php echo esc_url(wp_nonce_url(admin_url('options-general.php?page=savor-media-studio&sms_test=' . $pid), 'sms_test')); ?>">Test</a>
 							<?php endif; ?>
+							<?php if ('openrouter' === $pid) : ?>
+								<?php $free = SMS_Translate::openrouter_free_models(); ?>
+								<p style="margin-top:6px"><input name="sms_settings[openrouter_model]" list="sms-or-free" value="<?php echo esc_attr($s['openrouter_model'] ?? ''); ?>" class="regular-text code" placeholder="Model — automatic (best free models, with fallbacks)"></p>
+								<datalist id="sms-or-free"><?php foreach ($free as $m) : ?><option value="<?php echo esc_attr($m); ?>"><?php endforeach; ?><option value="openrouter/free"></datalist>
+								<p class="description">Leave the model empty: the studio uses OpenRouter's current free models, best for Bangla first, and falls back to the next one when a model is busy or retired (<?php echo esc_html(count($free)); ?> free models available now<?php echo $free ? ': ' . esc_html(implode(', ', array_slice($free, 0, 4))) . '…' : ''; ?>). Or type one or more model ids, separated by commas. Free models allow about 20 requests a minute and 50 a day (1,000 a day after buying $10 of OpenRouter credit).</p>
+							<?php else : ?>
 							<p style="margin-top:6px"><input name="sms_settings[<?php echo esc_attr($pid); ?>_model]" value="<?php echo esc_attr($s[$pid . '_model'] ?? ''); ?>" class="regular-text" placeholder="Model — automatic (<?php echo esc_attr(SMS_Translate::model($pid)); ?>)"></p>
+							<?php endif; ?>
 						</td>
 					</tr>
 					<?php endforeach; ?>

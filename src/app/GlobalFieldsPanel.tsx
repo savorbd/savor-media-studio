@@ -327,7 +327,7 @@ export function GlobalFieldsPanel({ p, selected, setSelected, hoverKey, onHover,
             { label: selected.size ? `Translate ${selected.size} selected to Bangla` : 'Translate all fields to Bangla', heading: true },
             { label: 'Offline dictionary', icon: <Languages />, hint: 'instant', onSelect: () => onTranslate('offline') },
             ...providers.map(pr => ({ label: pr.label, icon: <Sparkles />, onSelect: () => onTranslate(pr.id) })),
-            ...(providers.length ? [] : [{ separator: true, label: '' }, { label: 'Add Gemini, Claude or ChatGPT keys in WordPress → Settings → Media Studio', disabled: true }]),
+            ...(providers.length ? [] : [{ separator: true, label: '' }, { label: 'Add a Gemini, Claude, ChatGPT or OpenRouter key in WordPress → Settings → Media Studio', disabled: true }]),
             { separator: true, label: '' },
             { label: 'Values marked “Don\'t translate” are skipped', disabled: true },
           ]} trigger={t => <Button size="sm" variant={selected.size ? 'primary' : 'outline'} loading={translating} className="h-6 px-1.5 text-[11.5px]" {...t} title={selected.size ? 'Translate the selected values to Bangla' : 'Translate all values to Bangla'}><Languages className="size-3.5" />{selected.size ? 'Translate' : 'Translate all'}<ChevronDown className="size-3 opacity-60" /></Button>} />
