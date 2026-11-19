@@ -403,7 +403,7 @@ class SMS_Translate {
 			}
 			$model   = array_shift($queue);
 			$tried[] = $model;
-			$limit   = 'openrouter' === $provider ? ('html' === $mode ? 120 : 75) : ('html' === $mode ? 90 : 45);
+			$limit   = 'openrouter' === $provider ? ('html' === $mode ? 120 : 75) : ('html' === $mode ? 100 : 70);
 			$res     = self::call($provider, $model, $key, $fields, $mode, max(8, min($limit, $deadline - time())));
 			if (!is_wp_error($res) && 200 === $res[0]) {
 				if ('openrouter' === $provider && $queue && null === self::parse_translations($res[1], $fields)) {
