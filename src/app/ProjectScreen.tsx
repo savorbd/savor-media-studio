@@ -2,19 +2,19 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertTriangle, ArrowLeft, Check, ChevronDown, Cloud, CloudOff, Code2, Copy, Download, Eye, EyeOff, FileCode2, FileDown, FilePlus2, FileText,
   FileType2, History, LayoutGrid, Loader2, MoreHorizontal, PanelLeft, PanelRight, Pencil, Plus, Printer, RotateCcw, Trash2, Upload, X,
-  UnfoldVertical, Square, Underline, PaintBucket,
+  UnfoldVertical, Square, Underline, PaintBucket, Mic,
 } from 'lucide-react';
 import { Store } from '../editor/store';
 import { DocModel, FONTS, parseDoc, serializeDoc } from '../editor/doc';
 import { ACCEPTED_UPLOADS, fileToDoc } from '../editor/importers';
-import { docOrder, shortDocLabel } from '../editor/templates';
+import { MC_SCRIPT, docOrder, mcScriptDoc, shortDocLabel } from '../editor/templates';
 import { copyText, downloadDocx, downloadHtml, downloadPdf, ensureDocFonts, printDoc } from '../editor/export';
 import { aiProviders, defaultProvider, geminiAvailable, getPasscode, passcodeRequired, setPasscode, translateFields } from '../editor/translate';
 import { FIELD, FIELD_DEFS, RETIRED_FIELDS, Guest, ProjectValues, TextKey, slotHtml } from '../editor/values';
 import { AutoMode, autoBn, autoGuest, getAutoMode, kindOf, setAutoMode } from '../editor/autoTranslate';
 import { applyInlineEdits } from '../editor/inlineEdits';
 import { HighlightMode, focusCss, highlightCss as buildHighlightCss } from '../editor/highlight';
-import { applyValuesToRoot, clearOverrides, readInlineEdits } from '../editor/bindings';
+import { applyValuesToBody, applyValuesToRoot, cleanEditorHtml, clearOverrides, readInlineEdits, syncEachBlock } from '../editor/bindings';
 import { DetectionSummary, detectProject, finalizeBodies } from '../editor/detect';
 import { MARGIN_PRESETS, MARGIN_SIDES, clampMargin } from '../utils/pageMargins';
 import { StudioError, StudioVersion } from '../utils/studioServer';
@@ -133,8 +133,14 @@ export function ProjectScreen({ store, project, file, onNavigate, onClose }: { s
   const onEditorChange = (f: string, body: string) => {
     const doc = p.docsRef.current.find(d => d.file === f);
     if (!doc) return;
-    p.updateModel(f, m => (m.body === body ? m : { ...m, body }));
     const root = editors.current[f]?.root();
+    // Per-guest blocks (MC script): new wording in the first copy is copied to every guest.
+    if (root) {
+      let synced = false;
+      root.querySelectorAll<HTMLElement>('[data-each]').forEach(el => { if (syncEachBlock(el, doc.model.lang, p.valuesRef.current, true)) synced = true; });
+      if (synced) body = cleanEditorHtml(editors.current[f]!.getBody());
+    }
+    p.updateModel(f, m => (m.body === body ? m : { ...m, body }));
     if (!root) return;
     const edits = readInlineEdits(root, doc.model.lang, p.valuesRef.current);
     if (!edits.length) return;
@@ -436,6 +442,19 @@ export function ProjectScreen({ store, project, file, onNavigate, onClose }: { s
     } catch (e: any) { toast('Could not add document', { tone: 'error', description: e?.message }); }
   };
 
+  /** The MC script of the inauguration: guests, host and chief guest come from the shared values. */
+  const addMcScript = async () => {
+    const name = uniqueName(MC_SCRIPT.file.replace(/\.html$/i, ''), p.docsRef.current.map(d => d.file.replace(/\.html$/i, '')), '.html');
+    const model = mcScriptDoc();
+    model.body = applyValuesToBody(model.body, model.lang, p.valuesRef.current);
+    try {
+      const r = await store.save(p.pathOf(name), serializeDoc(model), null, 'create');
+      p.setDocs(prev => [...(prev || []), { file: name, model, etag: r.etag, dirty: false, status: 'saved', savedAt: Date.now() }]);
+      switchTo(name);
+      toast('MC Script added', { description: 'Speeches and crests follow the special guests. Pick the host (welcome speech) on a guest card.' });
+    } catch (e: any) { toast('Could not add MC Script', { tone: 'error', description: e?.message }); }
+  };
+
   const deleteDoc = async (f: string) => {
     if (!(await confirm({ title: `Delete “${f.replace(/\.html$/i, '')}”?`, description: store.kind === 'server' ? 'It moves to the server trash for 30 days.' : 'It will be removed from this browser.', confirm: 'Delete', danger: true }))) return;
     try {
@@ -677,6 +696,8 @@ export function ProjectScreen({ store, project, file, onNavigate, onClose }: { s
                     );
                   })}
                   <Menu width="w-56" items={[
+                    { label: 'MC Script (English)', icon: <Mic />, onSelect: () => void addMcScript() },
+                    { separator: true, label: '' },
                     { label: 'Blank Bangla document', icon: <FilePlus2 />, onSelect: () => void addBlank('bn') },
                     { label: 'Blank English document', icon: <FilePlus2 />, onSelect: () => void addBlank('en') },
                     { separator: true, label: '' },

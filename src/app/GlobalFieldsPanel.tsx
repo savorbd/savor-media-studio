@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowDown, ArrowUp, ChevronDown, ChevronRight, Code2, Copy, GripVertical, Languages, PanelLeftClose, Plus, Redo2, RotateCcw, ScanSearch, Sparkles, Trash2, Undo2, X } from 'lucide-react';
-import { Bi, EN_PREFIXES, FieldGroup, Guest, ProjectValues, TextKey, colorFor, formatDate, formatTime, guestText, newId, ordinal, toBnDigits } from '../editor/values';
+import { ArrowDown, ArrowUp, ChevronDown, ChevronRight, Code2, Copy, GripVertical, Languages, Mic, PanelLeftClose, Plus, Redo2, RotateCcw, ScanSearch, Sparkles, Trash2, Undo2, X } from 'lucide-react';
+import { Bi, EN_PREFIXES, FieldGroup, Guest, ProjectValues, TextKey, colorFor, formatDate, formatTime, guestText, hostIndex, newId, ordinal, toBnDigits } from '../editor/values';
 import type { AutoMode } from '../editor/autoTranslate';
 import { autoGuest, kindOf, postfixBi, prefixBi, withBn, withEn } from '../editor/autoTranslate';
 import { Badge, Button, IconButton, Menu, cn, inputClass } from '../ui/ui';
@@ -108,7 +108,8 @@ function TokenList({ label, list, onChange, kind, lock }: { label: string; list:
   );
 }
 
-function GuestCard({ g, index, onChange, onRemove, onMove, onDuplicate, selected, onSelect, open, setOpen, color, drag, hovered, onHover }: {
+function GuestCard({ g, index, onChange, onRemove, onMove, onDuplicate, selected, onSelect, open, setOpen, color, drag, hovered, onHover, host, onMakeHost }: {
+  host?: boolean; onMakeHost?: (on: boolean) => void;
   g: Guest; index?: number; onChange: (g: Guest) => void; onRemove?: () => void; onMove?: (d: -1 | 1) => void; onDuplicate?: () => void;
   selected: boolean; onSelect: (v: boolean) => void; open: boolean; setOpen: (v: boolean) => void; color: string;
   drag?: { onDragStart: (e: React.DragEvent) => void; onDragOver: (e: React.DragEvent) => void; onDrop: (e: React.DragEvent) => void; onDragEnd: () => void; over: boolean };
@@ -140,6 +141,7 @@ function GuestCard({ g, index, onChange, onRemove, onMove, onDuplicate, selected
           <div className="flex items-center gap-1">
             {custom && <span className="rounded-full bg-amber-50 px-1.5 text-[10px] text-amber-800">custom</span>}
             {lock && <span title="Don't translate — Bangla is typed by hand" className="rounded-full bg-amber-50 px-1.5 text-[10px] font-medium text-amber-800">no translate</span>}
+            {host && <span title="Host: gives the welcome speech in the MC Script and exchanges crests with the chief guest" className="flex items-center gap-0.5 rounded-full bg-stone-100 px-1.5 text-[10px] font-medium text-stone-700"><Mic className="size-2.5" />host</span>}
             {!lock && <Check on={selected} onChange={onSelect} label={`Select ${g.name.en || 'guest'} for translation`} />}
           </div>
           <div className="flex opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100">
@@ -152,7 +154,14 @@ function GuestCard({ g, index, onChange, onRemove, onMove, onDuplicate, selected
       </div>
       {open && (
         <div className="space-y-2 border-t border-zinc-100 bg-zinc-50/60 p-2">
-          <div className="flex justify-end"><NoTranslate on={lock} onChange={on => { onChange({ ...g, noTranslate: on || undefined }); if (on) onSelect(false); }} label={g.name.en || 'guest'} /></div>
+          <div className="flex items-center justify-end gap-1">
+            {onMakeHost && (
+              <label title="The host gives the welcome speech in the MC Script and exchanges crests with the chief guest. Without a choice, the last special guest is the host." className={cn('mr-auto flex cursor-pointer items-center gap-1 rounded px-1 text-[10.5px] font-medium', host ? 'bg-stone-100 text-stone-800' : 'text-zinc-400 hover:text-zinc-600')}>
+                <input type="radio" aria-label={`Host of the MC Script: ${g.name.en || 'guest'}`} checked={!!host} onChange={() => onMakeHost(true)} className="size-3 accent-stone-600" />Host (welcome speech)
+              </label>
+            )}
+            <NoTranslate on={lock} onChange={on => { onChange({ ...g, noTranslate: on || undefined }); if (on) onSelect(false); }} label={g.name.en || 'guest'} />
+          </div>
           <TokenList label="Before the name (prefix)" kind="prefix" lock={lock} list={g.prefixes} onChange={l => onChange({ ...g, prefixes: l })} />
           <div>
             <span className="mb-1 block text-[11px] font-medium text-zinc-500">Name</span>
@@ -378,6 +387,7 @@ export function GlobalFieldsPanel({ p, selected, setSelected, hoverKey, onHover,
             {guests.map((g, i) => (
               <div key={g.id} data-panel-key={`specialGuests:${i + 1}`}>
                 <GuestCard g={g} index={i + 1} color={GROUP_COLOR.special.dot}
+                  host={i === hostIndex(v)} onMakeHost={() => set(cur => ({ ...cur, hostGuestId: g.id }), ['specialGuests'])}
                   onChange={ng => setGuests(guests.map(x => (x.id === g.id ? ng : x)))}
                   onRemove={() => setGuests(guests.filter(x => x.id !== g.id))}
                   onMove={d => move(i, d)}

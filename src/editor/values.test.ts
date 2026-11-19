@@ -39,3 +39,15 @@ test('guest lists split into guests with prefixes and postfixes', () => {
   assert.equal(b.designation, 'মহাপরিচালক, বাংলাদেশ কোস্ট গার্ড');
   assert.equal(guestText({ id: 'x', prefixes: [{ en: 'Mr.', bn: 'জনাব' }], name: { en: 'A B', bn: 'এ বি' }, postfixes: [{ en: 'ndc', bn: 'এনডিসি' }], designation: { en: 'Chairman', bn: 'চেয়ারম্যান' } }, 'bn'), 'জনাব এ বি, এনডিসি, চেয়ারম্যান');
 });
+
+test('MC script: host, guest parts and per-guest blocks', async () => {
+  const { eachHtml, hostIndex, guestPartHtml, emptyValues } = await import('./values');
+  const g = (id: string, name: string, des: string) => ({ id, prefixes: [{ en: 'Mr.', bn: 'জনাব' }], name: { en: name, bn: name }, postfixes: [], designation: { en: des, bn: des } });
+  const v = { ...emptyValues(), specialGuests: [g('a', 'Khorshed Alam', 'President'), g('b', 'Li Xiao', 'Director'), g('c', 'Faizul Alam', 'MD')] };
+  assert.equal(hostIndex(v), 2); // the last guest by default
+  assert.equal(hostIndex({ ...v, hostGuestId: 'a' }), 0);
+  assert.equal(guestPartHtml(v.specialGuests[1], 'en', 'name'), 'Mr. Li Xiao');
+  const html = eachHtml('<p>{name}: {designation}</p>', v, 'en', 'reverse', true);
+  assert.match(html, /data-rep="0"><p><span data-tok="name" data-gref="2">Mr\. Li Xiao<\/span>: <span data-tok="designation" data-gref="2">Director<\/span><\/p><\/div><div data-rep="1"><p><span data-tok="name" data-gref="1">Mr\. Khorshed Alam/);
+  assert.doesNotMatch(html, /Faizul/);
+});

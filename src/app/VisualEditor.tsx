@@ -2,6 +2,9 @@ import React, { forwardRef, useEffect, useImperativeHandle, useRef } from 'react
 import { DocModel, FONT_LINK, documentCss } from '../editor/doc';
 import { sanitizeEditorHtml } from '../editor/sanitize';
 import { textToBody } from '../editor/importers';
+
+/** Linked values (a per-guest block is a container of text, not a value). */
+const SLOT = '[data-field]:not([data-each]),[data-guest]';
 import { SHEET_CSS, flowBoxes, movableBoxes, moveBox, paginate, stripPagination } from '../editor/paginate';
 
 export interface ToolbarState {
@@ -44,7 +47,7 @@ body.sv-doc{outline:none;caret-color:#4f46e5}
 [data-sv-grip]{position:absolute;z-index:50;width:20px;display:flex;align-items:center;justify-content:center;border-radius:6px;background:#4f46e5;color:#fff;font:700 12px/1 Inter,system-ui,sans-serif;cursor:ns-resize;user-select:none;box-shadow:0 1px 3px rgba(0,0,0,.25);opacity:.85}
 [data-sv-grip]:hover{opacity:1}
 .sv-textbox{outline:1px dashed rgba(79,70,229,.35);outline-offset:1px}
-body.sv-hide-fields [data-field],body.sv-hide-fields [data-guest]{background:none!important;box-shadow:none!important;border-bottom:none!important}
+body.sv-hide-fields [data-field],body.sv-hide-fields [data-guest],body.sv-hide-fields [data-gref]{background:none!important;box-shadow:none!important;border-bottom:none!important}
 body.sv-hide-fields ~ [data-sv-badges]{display:none}
 [contenteditable="false"][data-field]{cursor:pointer}
 body.sv-doc hr.sv-page-break{outline:1.5px dashed #a5b4fc;outline-offset:0}
@@ -276,7 +279,8 @@ export const VisualEditor = forwardRef<EditorApi, Props>(function VisualEditor({
         const el = (node.nodeType === 1 ? node as Element : node.parentElement);
         // The outermost linked value around the caret (a guest list, not one guest in it).
         let slot: HTMLElement | null = null;
-        for (let x = el?.closest('[data-field],[data-guest]') as HTMLElement | null; x; x = x.parentElement?.closest('[data-field],[data-guest]') as HTMLElement | null) slot = x;
+        // (A per-guest block's first copy is ordinary text: Enter works as usual inside it.)
+        for (let x = el?.closest(SLOT) as HTMLElement | null; x; x = x.parentElement?.closest(SLOT) as HTMLElement | null) slot = x;
         if (!slot || !d.body.contains(slot)) return;
         e.preventDefault();
         if (!r0.collapsed) r0.deleteContents();
@@ -315,7 +319,7 @@ export const VisualEditor = forwardRef<EditorApi, Props>(function VisualEditor({
       const cleanSlots = () => {
         const sel = d.getSelection();
         const caret = sel && sel.rangeCount ? sel.getRangeAt(0).startContainer : null;
-        d.body.querySelectorAll<HTMLElement>('[data-field],[data-guest]').forEach(el => {
+        d.body.querySelectorAll<HTMLElement>(SLOT).forEach(el => {
           if ((el.textContent || '').replace(/[\u200B\s]/g, '') !== '' || el.querySelector('img')) return;
           if (caret && (el === caret || el.contains(caret))) return;
           el.remove();
@@ -330,7 +334,7 @@ export const VisualEditor = forwardRef<EditorApi, Props>(function VisualEditor({
         const r = sel.getRangeAt(0);
         const picked = r.toString().replace(/\s+/g, ' ').trim();
         if (!picked) return;
-        const slots = Array.from(d.body.querySelectorAll<HTMLElement>('[data-guest],[data-field]')).filter(el => r.intersectsNode(el) && el.getAttribute('contenteditable') !== 'false');
+        const slots = Array.from(d.body.querySelectorAll<HTMLElement>(SLOT)).filter(el => r.intersectsNode(el) && el.getAttribute('contenteditable') !== 'false');
         // The innermost value whose whole text is selected (a guest before its list).
         const slot = slots.reverse().find(el => (el.textContent || '').replace(/\s+/g, ' ').trim() === picked);
         if (!slot) return;

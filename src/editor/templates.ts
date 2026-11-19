@@ -1,7 +1,7 @@
 import { DocLang, DocModel, emptyDoc } from './doc';
-import { Lang, RETIRED_FIELDS, emptyValues, slotHtml } from './values';
+import { Lang, RETIRED_FIELDS, eachHtml, emptyValues, slotHtml } from './values';
 
-export interface ProjectDocSpec { file: string; title: string; lang: DocLang; kind: 'invitation' | 'press' }
+export interface ProjectDocSpec { file: string; title: string; lang: DocLang; kind: 'invitation' | 'press' | 'mc' }
 
 /** The four documents every new project starts with (file names inside the project folder). */
 export const PROJECT_DOCS: ProjectDocSpec[] = [
@@ -9,7 +9,9 @@ export const PROJECT_DOCS: ProjectDocSpec[] = [
   { file: 'Invitation (English).html', title: 'Media Invitation', lang: 'en', kind: 'invitation' },
   { file: 'Press Release (Bangla).html', title: 'সংবাদ বিজ্ঞপ্তি', lang: 'bn', kind: 'press' },
   { file: 'Press Release (English).html', title: 'Press Release', lang: 'en', kind: 'press' },
+  { file: 'MC Script (English).html', title: 'MC Script', lang: 'en', kind: 'mc' },
 ];
+export const MC_SCRIPT = PROJECT_DOCS[4];
 
 export function docOrder(file: string): number {
   const i = PROJECT_DOCS.findIndex(d => d.file === file);
@@ -18,7 +20,9 @@ export function docOrder(file: string): number {
 
 export function shortDocLabel(file: string): string {
   const known = PROJECT_DOCS.find(d => d.file === file);
+  if (known?.kind === 'mc') return 'MC Script';
   if (known) return `${known.kind === 'invitation' ? 'Invitation' : 'Press release'} · ${known.lang === 'bn' ? 'বাংলা' : 'EN'}`;
+  if (/mc\s*script/i.test(file)) return file.replace(/\.html$/i, '');
   return file.replace(/\.html$/i, '');
 }
 
@@ -34,7 +38,15 @@ const RETIRED_TEXT: Record<string, Record<Lang, string>> = {
 function slot(lang: Lang, key: string, attrs: Record<string, string> = {}): string {
   if (RETIRED_FIELDS.has(key)) return RETIRED_TEXT[key]?.[lang] || ''; // plain text, not shared
   const a = Object.entries(attrs).map(([k, v]) => ` data-${k}="${v}"`).join('');
-  return `<span data-field="${key}"${a}>${slotHtml(emptyValues(), key, lang, { fmt: attrs.fmt })}</span>`;
+  return `<span data-field="${key}"${a}>${slotHtml(emptyValues(), key, lang, { fmt: attrs.fmt, part: attrs.part as any, pick: attrs.pick })}</span>`;
+}
+
+const attr = (s: string) => s.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+/** A block written once per special guest (wording with {name} and {designation}). */
+function eachBlock(lang: Lang, template: string, order: 'forward' | 'reverse', skipHost: boolean): string {
+  const t = template.trim().replace(/\n\s*/g, '');
+  return `<div data-field="specialGuests" data-each="${attr(t)}" data-order="${order}"${skipHost ? ' data-skip="host"' : ''}>${eachHtml(t, emptyValues(), lang, order, skipHost)}</div>`;
 }
 
 const J = 'text-align:justify';
@@ -91,6 +103,74 @@ function pressBn(): string {
 <p>বার্তা প্রেরক<br>${s('contactName')}<br>${s('contactTitle')}<br>${s('contactOrg')}<br>মোবাইল: ${s('contactPhone')}</p>`;
 }
 
+/** MC script of the inauguration ceremony (from Savor's BEVMX 2026 script). Speeches: the host's welcome,
+ * then the special guests from last to first, then the chief guest. Crests: the special guests in printed order,
+ * the host to the chief guest, the chief guest to the host. */
+function mcScriptEn(): string {
+  const s = (k: string, a?: Record<string, string>) => slot('en', k, a);
+  const P = 'text-align:justify;line-height:1.5';
+  const MARK = 'text-align:center;font-size:24pt;color:#808080;margin:.4em 0';
+  const hostName = s('specialGuests', { pick: 'host', part: 'name' });
+  const hostDesig = s('specialGuests', { pick: 'host', part: 'designation' });
+  const chiefName = s('chiefGuest', { part: 'name' });
+  const chiefDesig = s('chiefGuest', { part: 'designation' });
+  const thanks = `<p style="${P}">Thank you Sir for your valuable speech. It was really interesting to hear from you.</p>`;
+  return `
+<p style="text-align:center"><strong>MC Script of ${s('shortName')} ${s('year')}</strong></p>
+<p style="text-align:center;margin-bottom:0"><strong><span style="font-size:20pt;color:#e16c08">Inaugural Ceremony – ${s('shortName')} ${s('year')}</span></strong></p>
+<p style="text-align:center;font-size:14pt"><strong>Inaugural Ceremony</strong>: ${s('eventTime', { fmt: 'h:mm A' })} – 11:30 AM</p>
+<p style="text-align:center;font-size:14pt">Venue: Expo Village, International Convention City Bashundhara (ICCB)</p>
+<p><br></p>
+<p style="${P}">Ladies &amp; Gentlemen,</p>
+<p style="${P}">Good Morning</p>
+<p style="${P}">Today is ${s('eventDate', { fmt: 'D MMMM, YYYY' })}</p>
+<p style="${P}">This is......, your Master of the Ceremony for today.</p>
+<p><br></p>
+<p style="${P}">We have convened here today for a significant purpose - the International Exhibitions titled <strong>“${s('exhibitionName')} (${s('shortName')} ${s('year')})”</strong>. These international exhibitions are organized by <strong>Savor International Limited</strong>.</p>
+<p><br></p>
+<p style="${P}">The program starts with the welcome speech. I would like to request to come on stage, <strong>${hostName}</strong>, ${hostDesig}.</p>
+<p style="${MARK}">[Speech of ${hostName}]</p>
+<p style="${P}">Thank you Sir for the welcome speech.</p>
+<p><br></p>
+${eachBlock('en', `
+<p style="${P}">Now I would like to request our Special Guest <strong>{name},</strong> {designation} to present his valuable speech.</p>
+<p style="${MARK}">[Speech of {name}]</p>
+${thanks}
+<p><br></p>`, 'reverse', true)}
+<p style="${P}">Now, I would like to request our Honorable Chief Guest <strong>${chiefName},</strong> ${chiefDesig} to deliver his valuable speech.</p>
+<p style="${MARK}">[Speech of ${chiefName}]</p>
+<p style="${P}">Thank you Sir for your valuable speech. It was really interesting and inspiring to hear from you.</p>
+<p><br></p>
+<p style="${MARK}">[Inauguration Ceremony]</p>
+<p style="${P}">The highly anticipated moment we have all been eagerly awaiting, has arrived. I kindly request all our esteemed guests to join us for the Inaugural Ceremony. As you can see, the ribbon before us symbolizes the commencement of this international exhibition. Our distinguished guests will now officially inaugurate the event by cutting the ribbon.</p>
+<p style="${P}"><strong>May I request our distinguished guests to cut the ribbon on the count of five. One… Two… Three… Four… Five!</strong></p>
+<p style="${P}">We extend our heartfelt gratitude to each and every one of you for gracing this ceremony with your presence and contributing to its exceptional significance.</p>
+<p><br></p>
+<p style="${MARK}">[Crest giving ceremony]</p>
+<p style="${P}">Honorable Guests, your spontaneous participation has made our program successful today. Please accept gratitude from the bottom of our heart. At this moment we are going to start crest giving ceremony.</p>
+<p><br></p>
+${eachBlock('en', `
+<p style="${P}">Now I would like to request our Special Guest, <strong>{name},</strong> {designation} will receive the crest from our honorable Chief Guest.</p>
+<p style="${P}">Thank you sir.</p>
+<p><br></p>`, 'forward', true)}
+<p style="${P}">I would like to request <strong>${hostName}</strong>, ${hostDesig} to give the crest to our honorable Chief Guest <strong>${chiefName},</strong> ${chiefDesig}.</p>
+<p style="${P}">Thank you sir.</p>
+<p><br></p>
+<p style="${P}">It’s time to thank our Organizer <strong>${hostName}</strong>, ${hostDesig}.</p>
+<p style="${P}">Now I would like to request our Chief Guest to present the crest to <strong>${hostName}</strong>, ${hostDesig}.</p>
+<p style="${P}">Thank you Sir.</p>
+<p><br></p>
+<p style="${P}">We would like to extend our heartfelt gratitude to all our guests to witness the historical moment. Please keep us in your prayers for achieving all the success possible in days to come.</p>
+<p style="${P}">Good luck and have a wonderful day. This inauguration ceremony will end up with the photo session. I would like to request our respected sponsors to come up on the stage and join in the photo session with our honorable guests.</p>
+<p><br></p>
+<p style="text-align:center"><strong>Thank you</strong></p>`;
+}
+
+/** A new MC script document (Calibri 18 pt like Savor's Word script). */
+export function mcScriptDoc(): DocModel {
+  return { ...emptyDoc(MC_SCRIPT.title, 'en', mcScriptEn().trim()), font: "Calibri, Carlito, 'Hind Siliguri', sans-serif", fontSize: 18 };
+}
+
 export interface ProjectTemplate {
   id: 'standard' | 'blank' | 'bimox' | 'upload';
   name: string;
@@ -98,7 +178,7 @@ export interface ProjectTemplate {
 }
 
 export const TEMPLATES: ProjectTemplate[] = [
-  { id: 'standard', name: 'Event invitation & press release', description: 'Bangla and English letters with shared fields for the exhibition, dates, guests and contact.' },
+  { id: 'standard', name: 'Event invitation & press release', description: 'Bangla and English letters and the MC script, with shared fields for the exhibition, dates, guests and contact.' },
   { id: 'bimox', name: 'BIMOX 2026 sample', description: 'The four real BIMOX 2026 documents. Shared fields are found automatically.' },
   { id: 'blank', name: 'Blank', description: 'Four empty pages: invitation and press release in Bangla and English.' },
   { id: 'upload', name: 'From my files', description: 'Upload Word, HTML or text files. Shared fields are found automatically.' },
@@ -109,9 +189,9 @@ export function standardDocs(): { spec: ProjectDocSpec; model: DocModel }[] {
     'Invitation (Bangla).html': invitationBn, 'Invitation (English).html': invitationEn,
     'Press Release (Bangla).html': pressBn, 'Press Release (English).html': pressEn,
   };
-  return PROJECT_DOCS.map(spec => ({ spec, model: emptyDoc(spec.title, spec.lang, bodies[spec.file]().trim()) }));
+  return PROJECT_DOCS.map(spec => ({ spec, model: spec.kind === 'mc' ? mcScriptDoc() : emptyDoc(spec.title, spec.lang, bodies[spec.file]().trim()) }));
 }
 
 export function blankDocs(): { spec: ProjectDocSpec; model: DocModel }[] {
-  return PROJECT_DOCS.map(spec => ({ spec, model: emptyDoc(spec.title, spec.lang) }));
+  return PROJECT_DOCS.filter(s => s.kind !== 'mc').map(spec => ({ spec, model: emptyDoc(spec.title, spec.lang) }));
 }
