@@ -87,13 +87,13 @@ export function sanitizeEditorHtml(source: string): string {
     for (const flag of ['data-bold', 'data-override']) if (el.getAttribute(flag) === '1') next.setAttribute(flag, '1');
     const guest = el.getAttribute('data-guest'); if (guest && /^\d{1,3}$/.test(guest)) next.setAttribute('data-guest', guest);
     // Guest parts, the host and per-guest blocks (MC script).
-    const part = el.getAttribute('data-part'); if (part && /^(name|designation|full)$/.test(part)) next.setAttribute('data-part', part);
+    const part = el.getAttribute('data-part'); if (part && /^(name|designation|full|his|Sir|sir)$/.test(part)) next.setAttribute('data-part', part);
     if (el.getAttribute('data-pick') === 'host') next.setAttribute('data-pick', 'host');
     const order = el.getAttribute('data-order'); if (order && /^(forward|reverse)$/.test(order)) next.setAttribute('data-order', order);
     if (el.getAttribute('data-skip') === 'host') next.setAttribute('data-skip', 'host');
     const each = el.getAttribute('data-each'); if (each !== null && el.getAttribute('data-field') === 'specialGuests') next.setAttribute('data-each', sanitizeEditorHtml(each));
     const rep = el.getAttribute('data-rep'); if (rep && /^\d{1,3}$/.test(rep)) next.setAttribute('data-rep', rep);
-    const tok = el.getAttribute('data-tok'); if (tok && /^(name|designation|full)$/.test(tok)) next.setAttribute('data-tok', tok);
+    const tok = el.getAttribute('data-tok'); if (tok && /^(name|designation|full|his|Sir|sir)$/.test(tok)) next.setAttribute('data-tok', tok);
     const gref = el.getAttribute('data-gref'); if (gref && /^\d{1,3}$/.test(gref)) next.setAttribute('data-gref', gref);
     const classes = (el.getAttribute('class') || '').split(/\s+/).filter(c => /^sv-[a-z0-9-]{1,30}$/.test(c));
     if (classes.length) next.setAttribute('class', classes.join(' '));

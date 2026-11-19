@@ -51,3 +51,12 @@ test('MC script: host, guest parts and per-guest blocks', async () => {
   assert.match(html, /data-rep="0"><p><span data-tok="name" data-gref="2">Mr\. Li Xiao<\/span>: <span data-tok="designation" data-gref="2">Director<\/span><\/p><\/div><div data-rep="1"><p><span data-tok="name" data-gref="1">Mr\. Khorshed Alam/);
   assert.doesNotMatch(html, /Faizul/);
 });
+
+test('MC script: his/her and Sir/Madam follow the guest title', async () => {
+  const { eachHtml, emptyValues } = await import('./values');
+  const g = (id: string, pre: string, name: string) => ({ id, prefixes: [{ en: pre, bn: '' }], name: { en: name, bn: '' }, postfixes: [], designation: { en: 'X', bn: '' } });
+  const v = { ...emptyValues(), specialGuests: [g('a', 'Ms.', 'Thitiporn'), g('b', 'Mr.', 'Li')] };
+  const html = eachHtml('<p>{name} {his} {Sir}</p>', v, 'en', 'forward', false);
+  assert.match(html, /Thitiporn<\/span> <span data-tok="his">her<\/span> <span data-tok="Sir">Madam/);
+  assert.match(html, /Li<\/span> <span data-tok="his">his<\/span> <span data-tok="Sir">Sir/);
+});

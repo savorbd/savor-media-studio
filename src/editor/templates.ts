@@ -114,7 +114,9 @@ function mcScriptEn(): string {
   const hostDesig = s('specialGuests', { pick: 'host', part: 'designation' });
   const chiefName = s('chiefGuest', { part: 'name' });
   const chiefDesig = s('chiefGuest', { part: 'designation' });
-  const thanks = `<p style="${P}">Thank you Sir for your valuable speech. It was really interesting to hear from you.</p>`;
+  const thanks = `<p style="${P}">Thank you {Sir} for your valuable speech. It was really interesting to hear from you.</p>`;
+  const hostSir = s('specialGuests', { pick: 'host', part: 'Sir' });
+  const chiefSir = s('chiefGuest', { part: 'Sir' });
   return `
 <p style="text-align:center"><strong>MC Script of ${s('shortName')} ${s('year')}</strong></p>
 <p style="text-align:center;margin-bottom:0"><strong><span style="font-size:20pt;color:#e16c08">Inaugural Ceremony – ${s('shortName')} ${s('year')}</span></strong></p>
@@ -130,16 +132,16 @@ function mcScriptEn(): string {
 <p><br></p>
 <p style="${P}">The program starts with the welcome speech. I would like to request to come on stage, <strong>${hostName}</strong>, ${hostDesig}.</p>
 <p style="${MARK}">[Speech of ${hostName}]</p>
-<p style="${P}">Thank you Sir for the welcome speech.</p>
+<p style="${P}">Thank you ${hostSir} for the welcome speech.</p>
 <p><br></p>
 ${eachBlock('en', `
-<p style="${P}">Now I would like to request our Special Guest <strong>{name},</strong> {designation} to present his valuable speech.</p>
+<p style="${P}">Now I would like to request our Special Guest <strong>{name},</strong> {designation} to present {his} valuable speech.</p>
 <p style="${MARK}">[Speech of {name}]</p>
 ${thanks}
 <p><br></p>`, 'reverse', true)}
-<p style="${P}">Now, I would like to request our Honorable Chief Guest <strong>${chiefName},</strong> ${chiefDesig} to deliver his valuable speech.</p>
+<p style="${P}">Now, I would like to request our Honorable Chief Guest <strong>${chiefName},</strong> ${chiefDesig} to deliver ${s('chiefGuest', { part: 'his' })} valuable speech.</p>
 <p style="${MARK}">[Speech of ${chiefName}]</p>
-<p style="${P}">Thank you Sir for your valuable speech. It was really interesting and inspiring to hear from you.</p>
+<p style="${P}">Thank you ${chiefSir} for your valuable speech. It was really interesting and inspiring to hear from you.</p>
 <p><br></p>
 <p style="${MARK}">[Inauguration Ceremony]</p>
 <p style="${P}">The highly anticipated moment we have all been eagerly awaiting, has arrived. I kindly request all our esteemed guests to join us for the Inaugural Ceremony. As you can see, the ribbon before us symbolizes the commencement of this international exhibition. Our distinguished guests will now officially inaugurate the event by cutting the ribbon.</p>
@@ -151,14 +153,14 @@ ${thanks}
 <p><br></p>
 ${eachBlock('en', `
 <p style="${P}">Now I would like to request our Special Guest, <strong>{name},</strong> {designation} will receive the crest from our honorable Chief Guest.</p>
-<p style="${P}">Thank you sir.</p>
+<p style="${P}">Thank you {sir}.</p>
 <p><br></p>`, 'forward', true)}
 <p style="${P}">I would like to request <strong>${hostName}</strong>, ${hostDesig} to give the crest to our honorable Chief Guest <strong>${chiefName},</strong> ${chiefDesig}.</p>
-<p style="${P}">Thank you sir.</p>
+<p style="${P}">Thank you ${s('chiefGuest', { part: 'sir' })}.</p>
 <p><br></p>
 <p style="${P}">It’s time to thank our Organizer <strong>${hostName}</strong>, ${hostDesig}.</p>
 <p style="${P}">Now I would like to request our Chief Guest to present the crest to <strong>${hostName}</strong>, ${hostDesig}.</p>
-<p style="${P}">Thank you Sir.</p>
+<p style="${P}">Thank you ${hostSir}.</p>
 <p><br></p>
 <p style="${P}">We would like to extend our heartfelt gratitude to all our guests to witness the historical moment. Please keep us in your prayers for achieving all the success possible in days to come.</p>
 <p style="${P}">Good luck and have a wonderful day. This inauguration ceremony will end up with the photo session. I would like to request our respected sponsors to come up on the stage and join in the photo session with our honorable guests.</p>
