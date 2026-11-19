@@ -299,6 +299,10 @@ class SMS_Translate {
 			return array($configured);
 		}
 		$list = array();
+		$busy  = (string) get_transient('sms_model_busy_' . $provider); // a lighter model that answered while the main one was overloaded
+		if ('' !== $busy) {
+			$list[] = $busy;
+		}
 		$found = (string) get_option('sms_model_found_' . $provider, '');
 		if ('' !== $found && ('gemini' !== $provider || preg_match('/^gemini-\d+(\.\d+)?-flash(-lite)?(-preview[-\w]*)?$|^gemini-flash(-lite)?-latest$/', $found))) {
 			$list[] = $found;
@@ -390,7 +394,8 @@ class SMS_Translate {
 		if (function_exists('set_time_limit')) {
 			@set_time_limit(300); // phpcs:ignore WordPress.PHP.NoSilencedErrors
 		}
-		$timeouts = 0;
+		$timeouts   = 0;
+		$overloaded = false;
 		// Give up before the studio stops waiting (150 s); the settings Test allows 40 s.
 		$deadline = time() + ($budget ? (int) $budget : 140);
 		while (count($tried) < ('openrouter' === $provider ? 4 : 6) && time() < $deadline - 5) {
@@ -425,6 +430,18 @@ class SMS_Translate {
 			if (!$first_fail) {
 				$first_fail = array($res, $model);
 			}
+			if ('gemini' === $provider && '' === $configured && in_array($res[0], array(429, 503), true)) {
+				// Overloaded: other full Flash models usually are too, and each refusal is slow — try Flash-Lite next.
+				if (!$discovered) {
+					$discovered = true;
+					$queue      = array_values(array_unique(array_merge($queue, array_diff(self::discover_model($provider, $key, ''), $tried))));
+				}
+				$lite  = array_values(array_filter($queue, function ($m) {
+					return false !== strpos($m, '-lite');
+				}));
+				$queue = array_values(array_unique(array_merge($lite, $queue)));
+				$overloaded = true;
+			}
 			if (('' !== $configured && 'openrouter' !== $provider) || !self::try_next($res[0], $res[2])) {
 				break;
 			}
@@ -449,7 +466,14 @@ class SMS_Translate {
 			return new WP_Error('sms_ai_partial', $label . ' returned an incomplete translation. Nothing was changed; try again.', array('status' => 502));
 		}
 		if ('' === $configured && 'openrouter/free' !== $model) {
-			update_option('sms_model_found_' . $provider, $model, false);
+			if (!empty($overloaded) && false !== strpos($model, '-lite')) {
+				set_transient('sms_model_busy_' . $provider, $model, 30 * MINUTE_IN_SECONDS); // use it for a while, then try the full model again
+			} elseif ($model === (string) get_transient('sms_model_busy_' . $provider)) {
+				// still in the overload window: keep the full model as the normal choice
+			} else {
+				update_option('sms_model_found_' . $provider, $model, false);
+				delete_transient('sms_model_busy_' . $provider);
+			}
 		}
 		return array(
 			'translations' => array_map(function ($t) {
