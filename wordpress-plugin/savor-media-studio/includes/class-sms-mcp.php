@@ -168,6 +168,7 @@ class SMS_Mcp {
 				'name'        => $bi,
 				'postfixes'   => array('type' => 'array', 'items' => $bi, 'description' => 'After the name, e.g. "(Retd)", "ndc", "psc", "PhD".'),
 				'designation' => $bi,
+				'noTranslate' => array('type' => 'boolean', 'description' => '"Don\'t translate" for the whole guest: every Bangla part is kept as typed.'),
 			),
 		);
 		$ro   = array('readOnlyHint' => true, 'destructiveHint' => false, 'openWorldHint' => false);
@@ -193,14 +194,15 @@ class SMS_Mcp {
 					'regex'   => array('type' => 'boolean', 'description' => 'Treat find as a PCRE pattern without delimiters; replace may use $1.'),
 				), 'required' => array('find', 'replace'))),
 			), array('project', 'file', 'edits'), $rw),
-			self::t('create_document', 'Create / upload document', 'Add a document to a project from HTML, Markdown, plain text or a Word file (docx_base64). Give exactly one content field.', array(
+			self::t('create_document', 'Create / upload document', 'Add a document to a project from HTML, Markdown, plain text or a Word file (docx_base64) — or template "mc_script" for the MC script of the inauguration (speeches and crests follow the special guests; file defaults to "MC Script (English).html"). Give exactly one content field or the template.', array(
 				'project' => $project, 'file' => $file,
+				'template' => array('type' => 'string', 'enum' => array('mc_script'), 'description' => 'Start from a ready document instead of your own content.'),
 				'lang'    => array('type' => 'string', 'enum' => array('en', 'bn'), 'description' => 'Which language of the shared values this document shows.'),
 				'title'   => array('type' => 'string'),
 				'html'    => array('type' => 'string'), 'markdown' => array('type' => 'string'), 'text' => array('type' => 'string'),
 				'docx_base64' => array('type' => 'string', 'description' => 'A .docx file, base64-encoded.'),
 				'replace' => array('type' => 'boolean', 'description' => 'Overwrite a document with the same name.'),
-			), array('project', 'file'), $rw),
+			), array('project'), $rw),
 			self::t('update_document_settings', 'Page settings', 'Title, language, page margins (inches, A4), default font and size. Leave "files" out to change every document in the project.', array(
 				'project'   => $project,
 				'files'     => array('type' => 'array', 'items' => array('type' => 'string')),
@@ -229,12 +231,19 @@ class SMS_Mcp {
 			), array('project', 'values'), $rw),
 			self::t('edit_special_guest', 'Edit a special guest', 'Add, change, remove or reorder one special guest (numbers are 1-based and are the printed order). Bangla is translated when you give only English.', array(
 				'project'  => $project,
-				'action'   => array('type' => 'string', 'enum' => array('add', 'update', 'remove', 'move')),
-				'index'    => array('type' => 'integer', 'description' => 'Guest number (update/remove/move). For add: insert at this number (default: end).'),
+				'action'   => array('type' => 'string', 'enum' => array('add', 'update', 'remove', 'move', 'set_host'), 'description' => 'set_host: this guest gives the welcome speech in the MC script and exchanges crests with the chief guest (index 0 = back to the default, the last special guest).'),
+				'index'    => array('type' => 'integer', 'description' => 'Guest number (update/remove/move/set_host). For add: insert at this number (default: end).'),
 				'to'       => array('type' => 'integer', 'description' => 'New number (move).'),
 				'guest'    => $guest,
 				'translate' => array('type' => 'string', 'enum' => array('auto', 'none')),
 			), array('project', 'action'), $rw),
+			self::t('set_guest_block_wording', 'Change a repeated guest section', 'MC script: change the wording of a section that repeats for every special guest (e.g. the speech invitation or the crest line). Every copy updates. Use read_document to see the blocks ("guest_block": 1, 2…) and their current wording. Tokens: {name} (title + name), {designation}, {full}, {his} (his/her), {Sir} / {sir} (Sir/Madam) — he/she words follow the guest\'s title.', array(
+				'project' => $project, 'file' => $file,
+				'block'   => array('type' => 'integer', 'description' => '1 = first repeated section in the document, 2 = second…'),
+				'wording' => array('type' => 'string', 'description' => 'HTML for one guest, e.g. <p style="text-align:justify">Now I would like to request our Special Guest <strong>{name},</strong> {designation} to present {his} valuable speech.</p>'),
+				'order'   => array('type' => 'string', 'enum' => array('forward', 'reverse'), 'description' => 'Optional: forward = printed order, reverse = last guest first.'),
+				'without_host' => array('type' => 'boolean', 'description' => 'Optional: leave out the host (welcome-speech guest).'),
+			), array('project', 'file', 'block', 'wording'), $rw),
 			self::t('link_text', 'Link text to a shared value', 'Turn text in a document into a linked slot for a shared value, so it follows the value everywhere. If the value is still empty, it is set from this text (text values only).', array(
 				'project'    => $project, 'file' => $file,
 				'text'       => array('type' => 'string', 'description' => 'Exact text as it appears (inside one paragraph, not across bold/italic boundaries).'),
@@ -293,7 +302,7 @@ class SMS_Mcp {
 			. "• A name, date, guest, contact etc.: set_shared_values or edit_special_guest. Never edit the text inside a data-field span to change a value — slots are re-filled from the shared values whenever a document is saved.\n"
 			. "• Wording, layout, styles, adding/removing paragraphs: edit_document (small find-and-replace) or write_document (whole body). Use inline styles (text-align, font-family, font-size in pt, font-weight, color, margin). Keep slots intact.\n"
 			. "• Page margins, font, size, title, language: update_document_settings (all documents at once if you leave files out).\n"
-			. "• MC script: <span data-field=\"chiefGuest\" data-part=\"name|designation\"> shows one part of the chief guest; <span data-field=\"specialGuests\" data-pick=\"host\" data-part=\"name\"> is the host (welcome speech: the special guest picked as host in project.json hostGuestId, else the last one). <div data-field=\"specialGuests\" data-each=\"…wording with {name} {designation}…\" data-order=\"forward|reverse\" data-skip=\"host\"> repeats its wording once per special guest: change the wording in data-each, never the copies.\n"
+			. "• MC script: <span data-field=\"chiefGuest\" data-part=\"name|designation\"> shows one part of the chief guest; <span data-field=\"specialGuests\" data-pick=\"host\" data-part=\"name\"> is the host (welcome speech: the special guest picked as host in project.json hostGuestId, else the last one). <div data-field=\"specialGuests\" data-each=\"…wording with {name} {designation}…\" data-order=\"forward|reverse\" data-skip=\"host\"> repeats its wording once per special guest: change it with set_guest_block_wording (never edit the copies). Pick the host with edit_special_guest action \"set_host\". Add an MC script with create_document template \"mc_script\".\n"
 			. "• Floating boxes (e.g. the program schedule) are <div class=\"sv-textbox\" style=\"…\">; move them up/down by moving the div between paragraphs or changing its margin-top. A manual page break is <hr class=\"sv-page-break\">.\n"
 			. "• The canvas and print use the same A4 layout: a paragraph that doesn't fit at the bottom of a page moves whole to the next page.\n"
 			. "• Bangla: give both en and bn when you know the correct Bangla; otherwise the site's AI translates (formal Bangladesh style).\n"
@@ -391,8 +400,33 @@ class SMS_Mcp {
 		list($dom, $root) = SMS_Doc::load_fragment($body);
 		$xp  = new DOMXPath($dom);
 		$out = array();
+		$block = 0;
 		foreach ($xp->query('.//*[@data-field]', $root) as $el) {
 			$item = array('field' => $el->getAttribute('data-field'), 'text' => trim(preg_replace('/\s+/u', ' ', $el->textContent)));
+			if ($el->hasAttribute('data-each')) {
+				// A section repeated once per special guest (MC script).
+				$names = array();
+				foreach ($xp->query('./*[@data-rep]', $el) as $rep) {
+					$n = $xp->query('.//*[@data-tok="name"]', $rep)->item(0);
+					$names[] = $n ? trim(preg_replace('/\s+/u', ' ', $n->textContent)) : '';
+				}
+				$out[] = array(
+					'field' => 'specialGuests', 'guest_block' => ++$block,
+					'order' => 'reverse' === $el->getAttribute('data-order') ? 'last guest first' : 'printed order',
+					'without_host' => 'host' === $el->getAttribute('data-skip'),
+					'wording' => $el->getAttribute('data-each'),
+					'guests' => $names,
+				);
+				continue;
+			}
+			if ($el->hasAttribute('data-part') || $el->hasAttribute('data-pick')) {
+				$item['part'] = $el->getAttribute('data-part') ? $el->getAttribute('data-part') : 'full';
+				if ('host' === $el->getAttribute('data-pick')) {
+					$item['host'] = true;
+				}
+				$out[] = $item;
+				continue;
+			}
 			if ($el->getAttribute('data-fmt')) {
 				$item['format'] = $el->getAttribute('data-fmt');
 			}
@@ -489,6 +523,12 @@ class SMS_Mcp {
 			return $p;
 		}
 		$file = (string) self::arg($a, 'file', '');
+		if ('mc_script' === self::arg($a, 'template')) {
+			return self::create_mc_script($p, '' !== $file ? $file : 'MC Script (English).html', (bool) self::arg($a, 'replace'));
+		}
+		if ('' === $file) {
+			return new WP_Error('sms_bad', 'Give a file name.');
+		}
 		$path = SMS_Project::doc_path($p, $file);
 		if (is_wp_error($path)) {
 			return $path;
@@ -523,6 +563,31 @@ class SMS_Mcp {
 		}
 		$r = SMS_Project::write_doc($p, basename($path), $model, self::arg($a, 'replace') ? 'save' : 'create');
 		return is_wp_error($r) ? $r : array_merge($r, array('lang' => $lang, 'studio_url' => SMS_Project::studio_url($p, basename($path)), 'tip' => 'Use link_text to connect names, dates and guests in this document to the shared values.'));
+	}
+
+	/** The MC script document (same as + → MC Script in the studio), filled from the shared values. */
+	private static function create_mc_script($p, $file, $replace) {
+		$path = SMS_Project::doc_path($p, $file);
+		if (is_wp_error($path)) {
+			return $path;
+		}
+		$tpl = null;
+		foreach ((array) json_decode((string) file_get_contents(SMS_DIR . 'data/templates.json'), true) as $d) {
+			if (false !== stripos((string) ($d['file'] ?? ''), 'MC Script')) {
+				$tpl = $d;
+			}
+		}
+		if (!$tpl) {
+			return new WP_Error('sms_bad', 'The MC script template is missing from this version of the plugin.');
+		}
+		$model = array('title' => $tpl['title'], 'lang' => $tpl['lang'], 'margins' => $tpl['margins'], 'font' => $tpl['font'], 'fontSize' => $tpl['fontSize'], 'body' => $tpl['body']);
+		$r     = SMS_Project::write_doc($p, basename($path), $model, $replace ? 'save' : 'create');
+		if (is_wp_error($r)) {
+			return $r;
+		}
+		$v    = SMS_Project::values($p);
+		$host = $v['specialGuests'] ? SMS_Values::guest_text($v['specialGuests'][SMS_Values::host_index($v)], 'en') : null;
+		return array_merge($r, array('lang' => 'en', 'host_welcome_speech' => $host, 'studio_url' => SMS_Project::studio_url($p, basename($path)), 'tip' => 'Speech and crest sections repeat for every special guest. Change who gives the welcome speech with edit_special_guest action "set_host"; change the wording of a repeated section with set_guest_block_wording.'));
 	}
 
 	private static function tool_update_document_settings($a) {
@@ -635,8 +700,10 @@ class SMS_Mcp {
 		$out['chiefGuest'] = $v['chiefGuest'] ? array('en' => SMS_Values::guest_text($v['chiefGuest'], 'en'), 'bn' => SMS_Values::guest_text($v['chiefGuest'], 'bn')) : null;
 		$out['specialGuests_in_printed_order'] = array();
 		foreach ($v['specialGuests'] as $i => $g) {
-			$out['specialGuests_in_printed_order'][] = array('number' => $i + 1, 'id' => $g['id'] ?? '', 'en' => SMS_Values::guest_text($g, 'en'), 'bn' => SMS_Values::guest_text($g, 'bn'));
+			$out['specialGuests_in_printed_order'][] = array_filter(array('number' => $i + 1, 'id' => $g['id'] ?? '', 'en' => SMS_Values::guest_text($g, 'en'), 'bn' => SMS_Values::guest_text($g, 'bn'), 'noTranslate' => !empty($g['noTranslate']) ? true : null), function ($x) { return null !== $x; });
 		}
+		$h = $v['specialGuests'] ? SMS_Values::host_index($v) : -1;
+		$out['host_welcome_speech'] = $h >= 0 ? array('number' => $h + 1, 'en' => SMS_Values::guest_text($v['specialGuests'][$h], 'en'), 'chosen' => !empty($v['hostGuestId']) && ($v['specialGuests'][$h]['id'] ?? '') === $v['hostGuestId']) : null;
 		return $out;
 	}
 
@@ -856,6 +923,17 @@ class SMS_Mcp {
 		$action = self::arg($a, 'action');
 		$index  = (int) self::arg($a, 'index', 0);
 		$queue  = array();
+		if ('set_host' === $action) {
+			if ($index < 0 || $index > $n) {
+				return new WP_Error('sms_bad', 'index must be 0 (default) or 1–' . $n . '.');
+			}
+			$v['hostGuestId'] = $index ? (string) ($list[$index - 1]['id'] ?? '') : null;
+			$changed = SMS_Project::save_values($p, $v);
+			if (is_wp_error($changed)) {
+				return $changed;
+			}
+			return array('saved' => true, 'documents_updated' => $changed, 'host_welcome_speech' => self::readable_values($v)['host_welcome_speech']);
+		}
 		if ('add' === $action) {
 			$pos = $index >= 1 && $index <= $n + 1 ? $index - 1 : $n;
 			array_splice($list, $pos, 0, array(null));
@@ -884,7 +962,7 @@ class SMS_Mcp {
 				$g = array_splice($list, $index - 1, 1);
 				array_splice($list, $to - 1, 0, $g);
 			} else {
-				return new WP_Error('sms_bad', 'action must be add, update, remove or move.');
+				return new WP_Error('sms_bad', 'action must be add, update, remove, move or set_host.');
 			}
 		}
 		$v['specialGuests'] = array_values($list);
@@ -894,6 +972,44 @@ class SMS_Mcp {
 			return $changed;
 		}
 		return array_filter(array('saved' => true, 'documents_updated' => $changed, 'translation' => $note, 'special_guests_in_printed_order' => self::readable_values($v)['specialGuests_in_printed_order']), function ($x) { return null !== $x; });
+	}
+
+	private static function tool_set_guest_block_wording($a) {
+		$d = self::doc($a);
+		if (is_wp_error($d)) {
+			return $d;
+		}
+		$wording = SMS_Storage::strip_active_content((string) self::arg($a, 'wording', ''));
+		if ('' === trim($wording) || !preg_match('/\{(name|full)\}/', $wording)) {
+			return new WP_Error('sms_bad', 'The wording must contain {name} or {full}.');
+		}
+		list($dom, $root) = SMS_Doc::load_fragment($d['model']['body']);
+		$xp     = new DOMXPath($dom);
+		$blocks = $xp->query('.//*[@data-each]', $root);
+		$i      = (int) self::arg($a, 'block', 1);
+		if ($i < 1 || $i > $blocks->length) {
+			return new WP_Error('sms_bad', 'block must be 1–' . $blocks->length . ' (this document has ' . $blocks->length . ' repeated guest sections).');
+		}
+		$el = $blocks->item($i - 1);
+		$el->setAttribute('data-each', $wording);
+		if (null !== self::arg($a, 'order')) {
+			$el->setAttribute('data-order', 'reverse' === self::arg($a, 'order') ? 'reverse' : 'forward');
+		}
+		if (null !== self::arg($a, 'without_host')) {
+			if (self::arg($a, 'without_host')) {
+				$el->setAttribute('data-skip', 'host');
+			} else {
+				$el->removeAttribute('data-skip');
+			}
+		}
+		$model         = $d['model'];
+		$model['body'] = SMS_Doc::inner_html($dom, $root);
+		$r             = SMS_Project::write_doc($d['project'], $d['file'], $model);
+		if (is_wp_error($r)) {
+			return $r;
+		}
+		$slots = array_values(array_filter(self::slots(SMS_Project::read_doc($d['project'], $d['file'])['model']['body']), function ($s) { return isset($s['guest_block']); }));
+		return array('saved' => true, 'block' => $slots[$i - 1] ?? null);
 	}
 
 	private static function tool_link_text($a) {
