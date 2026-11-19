@@ -165,12 +165,19 @@ export function guestsHtml(list: Guest[], lang: Lang, sep: GuestSep = 'comma', b
 }
 
 /* ---------- Parts of one guest, the host, and per-guest blocks (MC script) ---------- */
-export type GuestPart = 'name' | 'designation' | 'full';
+export type GuestPart = 'name' | 'designation' | 'full' | 'his' | 'Sir' | 'sir';
+
+const FEMALE = /^(ms\.?|mrs\.?|miss|madam|madame|begum|lady|dame|বেগম|জনাবা|মিসেস|মিস)$/i;
+/** A woman, judged by her title (Ms., Mrs., Miss, Begum…). */
+export const isFemale = (g: Guest) => g.prefixes.some(p => FEMALE.test((p.en || '').trim()) || FEMALE.test((p.bn || '').trim()));
 export type EachOrder = 'forward' | 'reverse';
 
 /** Title + name (+ postfixes such as MP) — "Mr. Faizul Alam"; or the designation alone. */
 export function guestPartHtml(g: Guest, lang: Lang, part: GuestPart = 'full', bold = false): string {
   if (part === 'full') return guestHtml(g, lang, bold);
+  if (part === 'his') return isFemale(g) ? 'her' : 'his';
+  if (part === 'Sir') return isFemale(g) ? 'Madam' : 'Sir';
+  if (part === 'sir') return isFemale(g) ? 'madam' : 'sir';
   if (part === 'designation') return esc(pick(g.designation, lang));
   const pre = g.prefixes.map(p => pick(p, lang)).filter(Boolean).join(' ');
   const name = esc(pick(g.name, lang));
@@ -191,18 +198,19 @@ export function eachGuests(v: ProjectValues, order: EachOrder = 'forward', skipH
   return order === 'reverse' ? list.reverse() : list;
 }
 
-const TOKEN = /\{(name|designation|full)\}/g;
+const TOKEN = /\{(name|designation|full|his|Sir|sir)\}/g;
 
-/** One copy of a per-guest block's wording for each guest. Tokens: {name}, {designation}, {full}. */
+/** One copy of a per-guest block's wording for each guest. Tokens: {name}, {designation}, {full}, {his} (his/her), {Sir}/{sir} (Sir/Madam). */
 export function eachHtml(template: string, v: ProjectValues, lang: Lang, order: EachOrder, skipHost: boolean, locked = false): string {
   const ce = locked ? ' contenteditable="false"' : '';
   const list = eachGuests(v, order, skipHost);
   if (!list.length) {
     const ph = esc(placeholder('specialGuests', lang));
-    return `<div data-rep="0">${template.replace(TOKEN, () => `<span data-tok="name"${ce}>${ph}</span>`)}</div>`;
+    return `<div data-rep="0">${template.replace(TOKEN, (_m, t: GuestPart) => `<span data-tok="${t}"${ce}>${t === 'his' ? 'his' : t === 'Sir' ? 'Sir' : t === 'sir' ? 'sir' : ph}</span>`)}</div>`;
   }
   // The first copy stays editable: changing its wording changes every copy.
-  return list.map(({ g, n }, i) => `<div data-rep="${i}"${i ? ce : ''}>${template.replace(TOKEN, (_m, t: GuestPart) => `<span data-tok="${t}" data-gref="${n}"${ce}>${guestPartHtml(g, lang, t)}</span>`)}</div>`).join('');
+  // (his/Sir words are not coloured as the guest — only names and designations are.)
+  return list.map(({ g, n }, i) => `<div data-rep="${i}"${i ? ce : ''}>${template.replace(TOKEN, (_m, t: GuestPart) => `<span data-tok="${t}"${/^(his|Sir|sir)$/.test(t) ? '' : ` data-gref="${n}"`}${ce}>${guestPartHtml(g, lang, t)}</span>`)}</div>`).join('');
 }
 
 /* ---------- Placeholders ---------- */
@@ -231,6 +239,9 @@ export function scalarText(values: ProjectValues, key: string, lang: Lang, fmt?:
 export function slotHtml(values: ProjectValues, key: string, lang: Lang, opts: { fmt?: string; sep?: GuestSep; bold?: boolean; part?: GuestPart; pick?: string } = {}): string {
   const def = FIELD.get(key);
   if (!def) return '';
+  const word = opts.part === 'his' || opts.part === 'Sir' || opts.part === 'sir' ? opts.part : null; // his/Sir until a guest is set
+  if (word && def.type === 'guest' && !values.chiefGuest) return word;
+  if (word && opts.pick === 'host' && !values.specialGuests.length) return word;
   if (def.type === 'guest') return values.chiefGuest ? guestPartHtml(values.chiefGuest, lang, opts.part, opts.bold) : esc(placeholder(key, lang));
   if (def.type === 'guests' && opts.pick === 'host') {
     const h = values.specialGuests[hostIndex(values)];

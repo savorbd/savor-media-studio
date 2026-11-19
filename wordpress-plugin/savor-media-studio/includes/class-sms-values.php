@@ -159,7 +159,27 @@ class SMS_Values {
 	}
 
 	/** Title + name (+ postfixes) — "Mr. Faizul Alam"; or the designation alone; or everything. */
+	public static function is_female($g) {
+		foreach ((array) ($g['prefixes'] ?? array()) as $p) {
+			foreach (array('en', 'bn') as $l) {
+				if (preg_match('/^(ms\.?|mrs\.?|miss|madam|madame|begum|lady|dame|বেগম|জনাবা|মিসেস|মিস)$/iu', trim((string) ($p[$l] ?? '')))) {
+					return true;
+				}
+			}
+		}
+		return false;
+	}
+
 	public static function guest_part_html($g, $lang, $part = 'full', $bold = false) {
+		if ('his' === $part) {
+			return self::is_female($g) ? 'her' : 'his';
+		}
+		if ('Sir' === $part) {
+			return self::is_female($g) ? 'Madam' : 'Sir';
+		}
+		if ('sir' === $part) {
+			return self::is_female($g) ? 'madam' : 'sir';
+		}
 		if ('designation' === $part) {
 			return self::esc(self::pick($g['designation'] ?? null, $lang));
 		}
@@ -199,13 +219,16 @@ class SMS_Values {
 		}
 		if (!$list) {
 			$ph = self::esc(self::placeholder('specialGuests', $lang));
-			return '<div data-rep="0">' . preg_replace('/\{(name|designation|full)\}/', '<span data-tok="name">' . $ph . '</span>', (string) $template) . '</div>';
+			return '<div data-rep="0">' . preg_replace_callback('/\{(name|designation|full|his|Sir|sir)\}/', function ($m) use ($ph) {
+				return '<span data-tok="' . $m[1] . '">' . (in_array($m[1], array('his', 'Sir', 'sir'), true) ? $m[1] : $ph) . '</span>';
+			}, (string) $template) . '</div>';
 		}
 		$out = '';
 		foreach ($list as $k => $item) {
 			list($g, $n) = $item;
-			$out .= '<div data-rep="' . $k . '">' . preg_replace_callback('/\{(name|designation|full)\}/', function ($m) use ($g, $n, $lang) {
-				return '<span data-tok="' . $m[1] . '" data-gref="' . $n . '">' . self::guest_part_html($g, $lang, $m[1]) . '</span>';
+			$out .= '<div data-rep="' . $k . '">' . preg_replace_callback('/\{(name|designation|full|his|Sir|sir)\}/', function ($m) use ($g, $n, $lang) {
+				$ref = in_array($m[1], array('his', 'Sir', 'sir'), true) ? '' : ' data-gref="' . $n . '"';
+				return '<span data-tok="' . $m[1] . '"' . $ref . '>' . self::guest_part_html($g, $lang, $m[1]) . '</span>';
 			}, (string) $template) . '</div>';
 		}
 		return $out;
@@ -254,6 +277,10 @@ class SMS_Values {
 		$def = self::FIELDS[$key] ?? null;
 		if (!$def) {
 			return '';
+		}
+		$word = in_array($part, array('his', 'Sir', 'sir'), true) ? $part : null;
+		if ($word && (('guest' === $def[2] && empty($values['chiefGuest'])) || ('host' === $pick && empty($values['specialGuests'])))) {
+			return $word;
 		}
 		if ('guest' === $def[2]) {
 			return !empty($values['chiefGuest']) ? self::guest_part_html($values['chiefGuest'], $lang, $part ? $part : 'full', $bold) : self::esc(self::placeholder($key, $lang));
