@@ -158,6 +158,59 @@ class SMS_Values {
 		return implode(', ', array_filter(array_merge(array($head), $post, array(self::esc(self::pick($g['designation'] ?? null, $lang)))), 'strlen'));
 	}
 
+	/** Title + name (+ postfixes) — "Mr. Faizul Alam"; or the designation alone; or everything. */
+	public static function guest_part_html($g, $lang, $part = 'full', $bold = false) {
+		if ('designation' === $part) {
+			return self::esc(self::pick($g['designation'] ?? null, $lang));
+		}
+		if ('name' !== $part) {
+			return self::guest_html($g, $lang, $bold);
+		}
+		$pre  = implode(' ', array_filter(array_map(function ($p) use ($lang) { return self::pick($p, $lang); }, (array) ($g['prefixes'] ?? array())), 'strlen'));
+		$name = self::esc(self::pick($g['name'] ?? null, $lang));
+		$head = implode(' ', array_filter(array(self::esc($pre), ($bold && '' !== $name) ? '<strong>' . $name . '</strong>' : $name), 'strlen'));
+		$post = array_filter(array_map(function ($p) use ($lang) { return self::esc(self::pick($p, $lang)); }, (array) ($g['postfixes'] ?? array())), 'strlen');
+		return implode(', ', array_filter(array_merge(array($head), $post), 'strlen'));
+	}
+
+	/** The welcome-speech guest of the MC script: the one picked as host, else the last special guest. */
+	public static function host_index($values) {
+		$list = array_values((array) ($values['specialGuests'] ?? array()));
+		$id   = (string) ($values['hostGuestId'] ?? '');
+		foreach ($list as $i => $g) {
+			if ('' !== $id && ($g['id'] ?? '') === $id) {
+				return $i;
+			}
+		}
+		return count($list) - 1;
+	}
+
+	/** One copy of a per-guest block's wording for each guest (tokens {name}, {designation}, {full}). */
+	public static function each_html($template, $values, $lang, $order = 'forward', $skip_host = false) {
+		$list = array();
+		$host = self::host_index($values);
+		foreach (array_values((array) ($values['specialGuests'] ?? array())) as $i => $g) {
+			if (!($skip_host && $i === $host)) {
+				$list[] = array($g, $i + 1);
+			}
+		}
+		if ('reverse' === $order) {
+			$list = array_reverse($list);
+		}
+		if (!$list) {
+			$ph = self::esc(self::placeholder('specialGuests', $lang));
+			return '<div data-rep="0">' . preg_replace('/\{(name|designation|full)\}/', '<span data-tok="name">' . $ph . '</span>', (string) $template) . '</div>';
+		}
+		$out = '';
+		foreach ($list as $k => $item) {
+			list($g, $n) = $item;
+			$out .= '<div data-rep="' . $k . '">' . preg_replace_callback('/\{(name|designation|full)\}/', function ($m) use ($g, $n, $lang) {
+				return '<span data-tok="' . $m[1] . '" data-gref="' . $n . '">' . self::guest_part_html($g, $lang, $m[1]) . '</span>';
+			}, (string) $template) . '</div>';
+		}
+		return $out;
+	}
+
 	public static function guests_html($list, $lang, $sep = 'comma', $bold = false) {
 		$items = array();
 		foreach (array_values($list) as $i => $g) {
@@ -197,13 +250,18 @@ class SMS_Values {
 		return '';
 	}
 
-	public static function slot_html($values, $key, $lang, $fmt = null, $sep = null, $bold = false) {
+	public static function slot_html($values, $key, $lang, $fmt = null, $sep = null, $bold = false, $part = null, $pick = null) {
 		$def = self::FIELDS[$key] ?? null;
 		if (!$def) {
 			return '';
 		}
 		if ('guest' === $def[2]) {
-			return !empty($values['chiefGuest']) ? self::guest_html($values['chiefGuest'], $lang, $bold) : self::esc(self::placeholder($key, $lang));
+			return !empty($values['chiefGuest']) ? self::guest_part_html($values['chiefGuest'], $lang, $part ? $part : 'full', $bold) : self::esc(self::placeholder($key, $lang));
+		}
+		if ('guests' === $def[2] && 'host' === $pick) {
+			$list = array_values((array) ($values['specialGuests'] ?? array()));
+			$h    = $list[self::host_index($values)] ?? null;
+			return $h ? self::guest_part_html($h, $lang, $part ? $part : 'full', $bold) : self::esc('bn' === $lang ? '[স্বাগত বক্তা]' : '[Host]');
 		}
 		if ('guests' === $def[2]) {
 			return !empty($values['specialGuests']) ? self::guests_html($values['specialGuests'], $lang, $sep ? $sep : 'comma', $bold) : self::esc(self::placeholder($key, $lang));
@@ -242,7 +300,15 @@ class SMS_Values {
 			if (!$def || $el->hasAttribute('data-override')) {
 				continue;
 			}
-			$html = self::slot_html($values, $key, $lang, $el->getAttribute('data-fmt') ?: null, $el->getAttribute('data-sep') ?: null, '1' === $el->getAttribute('data-bold'));
+			if ($el->hasAttribute('data-each')) {
+				$html = self::each_html($el->getAttribute('data-each'), $values, $lang, 'reverse' === $el->getAttribute('data-order') ? 'reverse' : 'forward', 'host' === $el->getAttribute('data-skip'));
+				if (SMS_Doc::inner_html($dom, $el) !== $html) {
+					SMS_Doc::set_inner_html($dom, $el, $html);
+					$changed = true;
+				}
+				continue;
+			}
+			$html = self::slot_html($values, $key, $lang, $el->getAttribute('data-fmt') ?: null, $el->getAttribute('data-sep') ?: null, '1' === $el->getAttribute('data-bold'), $el->getAttribute('data-part') ?: null, $el->getAttribute('data-pick') ?: null);
 			if ('text' === $def[2] || 'phone' === $def[2]) {
 				$want = html_entity_decode(wp_strip_all_tags($html), ENT_QUOTES, 'UTF-8');
 				if (self::norm($el->textContent) === self::norm($want)) {
@@ -260,7 +326,7 @@ class SMS_Values {
 	/** How often each field appears in a body. */
 	public static function usage($body) {
 		$out = array();
-		if (preg_match_all('/<span\b[^>]*\bdata-field="([^"]+)"[^>]*>/', (string) $body, $m, PREG_SET_ORDER)) {
+		if (preg_match_all('/<(?:span|div)\b[^>]*\bdata-field="([^"]+)"[^>]*>/', (string) $body, $m, PREG_SET_ORDER)) {
 			foreach ($m as $hit) {
 				$k = $hit[1];
 				if (!isset($out[$k])) {

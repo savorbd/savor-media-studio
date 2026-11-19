@@ -25,9 +25,12 @@ export function highlightCss(scope = 'body.sv-doc ', mode: HighlightMode = 'outl
     rules.push(`${scope}[data-field="${f.key}"]{${look(mode, c)}}`);
   }
   rules.push(`${scope}[data-field="specialGuests"]{box-shadow:none;background:none}`);
+  // The host (welcome speech) in the MC script, and the copies of a per-guest block after the first.
+  rules.push(`${scope}[data-field="specialGuests"][data-pick="host"]{${look(mode, '#57534e')}}`);
+  rules.push(`${scope}[data-each]>[data-rep]:not([data-rep="0"]){cursor:default}`);
   for (let i = 1; i <= MAX_GUESTS; i++) {
     const c = colorFor(`specialGuests:${i}`);
-    rules.push(`${scope}[data-guest="${i}"]{${look(mode, c)}}[data-sv-badge="${i}"]{color:${c}}`);
+    rules.push(`${scope}[data-guest="${i}"],${scope}[data-gref="${i}"]{${look(mode, c)}}[data-sv-badge="${i}"]{color:${c}}`);
   }
   // Guest numbers are drawn in a layer outside the page text (see VisualEditor), so they can never
   // change where lines break — the canvas must lay out exactly like print.
@@ -36,7 +39,7 @@ export function highlightCss(scope = 'body.sv-doc ', mode: HighlightMode = 'outl
   return rules.join('\n');
 }
 
-const sel = (scope: string, key: string) => (key.startsWith('specialGuests:') ? `${scope}[data-guest="${key.split(':')[1]}"]` : `${scope}[data-field="${key}"]`);
+const sel = (scope: string, key: string) => (key.startsWith('specialGuests:') ? `${scope}[data-guest="${key.split(':')[1]}"],${scope}[data-gref="${key.split(':')[1]}"]` : `${scope}[data-field="${key}"]`);
 
 /** Hovered value: thicker border in its own colour. Selected value: light red. */
 export function focusCss(hoverKey: string | null, selectedKey: string | null, scope = 'body.sv-doc ', mode: HighlightMode = 'outline'): string {

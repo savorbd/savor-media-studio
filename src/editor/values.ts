@@ -32,6 +32,8 @@ export interface ProjectValues {
   contactPhone: string;
   chiefGuest: Guest | null;
   specialGuests: Guest[];
+  /** The special guest who gives the welcome speech in the MC script (default: the last one). */
+  hostGuestId?: string | null;
 }
 
 export const emptyValues = (): ProjectValues => ({
@@ -162,6 +164,47 @@ export function guestsHtml(list: Guest[], lang: Lang, sep: GuestSep = 'comma', b
   return items.join(', ');
 }
 
+/* ---------- Parts of one guest, the host, and per-guest blocks (MC script) ---------- */
+export type GuestPart = 'name' | 'designation' | 'full';
+export type EachOrder = 'forward' | 'reverse';
+
+/** Title + name (+ postfixes such as MP) — "Mr. Faizul Alam"; or the designation alone. */
+export function guestPartHtml(g: Guest, lang: Lang, part: GuestPart = 'full', bold = false): string {
+  if (part === 'full') return guestHtml(g, lang, bold);
+  if (part === 'designation') return esc(pick(g.designation, lang));
+  const pre = g.prefixes.map(p => pick(p, lang)).filter(Boolean).join(' ');
+  const name = esc(pick(g.name, lang));
+  const head = [esc(pre), bold && name ? `<strong>${name}</strong>` : name].filter(Boolean).join(' ');
+  return [head, ...g.postfixes.map(p => esc(pick(p, lang))).filter(Boolean)].filter(Boolean).join(', ');
+}
+
+/** The welcome-speech guest: the one picked as host, else the last special guest. */
+export function hostIndex(v: ProjectValues): number {
+  const i = v.hostGuestId ? v.specialGuests.findIndex(g => g.id === v.hostGuestId) : -1;
+  return i >= 0 ? i : v.specialGuests.length - 1;
+}
+
+/** Special guests for a per-guest block, with their printed numbers (1-based). */
+export function eachGuests(v: ProjectValues, order: EachOrder = 'forward', skipHost = false): { g: Guest; n: number }[] {
+  const host = hostIndex(v);
+  const list = v.specialGuests.map((g, i) => ({ g, n: i + 1 })).filter(x => !(skipHost && x.n - 1 === host));
+  return order === 'reverse' ? list.reverse() : list;
+}
+
+const TOKEN = /\{(name|designation|full)\}/g;
+
+/** One copy of a per-guest block's wording for each guest. Tokens: {name}, {designation}, {full}. */
+export function eachHtml(template: string, v: ProjectValues, lang: Lang, order: EachOrder, skipHost: boolean, locked = false): string {
+  const ce = locked ? ' contenteditable="false"' : '';
+  const list = eachGuests(v, order, skipHost);
+  if (!list.length) {
+    const ph = esc(placeholder('specialGuests', lang));
+    return `<div data-rep="0">${template.replace(TOKEN, () => `<span data-tok="name"${ce}>${ph}</span>`)}</div>`;
+  }
+  // The first copy stays editable: changing its wording changes every copy.
+  return list.map(({ g, n }, i) => `<div data-rep="${i}"${i ? ce : ''}>${template.replace(TOKEN, (_m, t: GuestPart) => `<span data-tok="${t}" data-gref="${n}"${ce}>${guestPartHtml(g, lang, t)}</span>`)}</div>`).join('');
+}
+
 /* ---------- Placeholders ---------- */
 export function placeholder(key: string, lang: Lang): string {
   const def = FIELD.get(key);
@@ -185,10 +228,14 @@ export function scalarText(values: ProjectValues, key: string, lang: Lang, fmt?:
 }
 
 /** HTML for any field slot. */
-export function slotHtml(values: ProjectValues, key: string, lang: Lang, opts: { fmt?: string; sep?: GuestSep; bold?: boolean } = {}): string {
+export function slotHtml(values: ProjectValues, key: string, lang: Lang, opts: { fmt?: string; sep?: GuestSep; bold?: boolean; part?: GuestPart; pick?: string } = {}): string {
   const def = FIELD.get(key);
   if (!def) return '';
-  if (def.type === 'guest') return values.chiefGuest ? guestHtml(values.chiefGuest, lang, opts.bold) : esc(placeholder(key, lang));
+  if (def.type === 'guest') return values.chiefGuest ? guestPartHtml(values.chiefGuest, lang, opts.part, opts.bold) : esc(placeholder(key, lang));
+  if (def.type === 'guests' && opts.pick === 'host') {
+    const h = values.specialGuests[hostIndex(values)];
+    return h ? guestPartHtml(h, lang, opts.part, opts.bold) : esc(lang === 'bn' ? '[স্বাগত বক্তা]' : '[Host]');
+  }
   if (def.type === 'guests') return values.specialGuests.length ? guestsHtml(values.specialGuests, lang, opts.sep, opts.bold) : esc(placeholder(key, lang));
   const t = scalarText(values, key, lang, opts.fmt);
   return esc(t || placeholder(key, lang));
