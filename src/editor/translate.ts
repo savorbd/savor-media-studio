@@ -9,7 +9,7 @@ export function geminiAvailable(): boolean {
   return !!getStudioConfig()?.gemini;
 }
 
-/** AI providers with a key on the server (Gemini, Claude, ChatGPT). */
+/** AI providers with a key on the server (Gemini, Claude, ChatGPT, OpenRouter). */
 export function aiProviders(): { id: string; label: string }[] {
   const c = getStudioConfig();
   if (c?.ai?.providers) return c.ai.providers;

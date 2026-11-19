@@ -31,7 +31,7 @@ jobs:
       - name: Check types
         run: npx tsc --noEmit
       - name: Build frontend for Pages
-        run: npx vite build --base /pr-and-media-invitation/ --outDir pages-dist
+        run: npx vite build --base /${{ github.event.repository.name }}/ --outDir pages-dist
         env:
           VITE_STATIC_PAGES: 'true'
           VITE_SUPABASE_URL: 'https://wergrlnhsskksdsyttbj.supabase.co'

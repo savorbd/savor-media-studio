@@ -1,7 +1,7 @@
 <?php
 /**
  * Plugin Name:       SAVOR Media Studio
- * Plugin URI:        https://github.com/md-alaminIslam/pr-and-media-invitation
+ * Plugin URI:        https://github.com/savorbd/savor-media-studio
  * Description:       Bangla & English media invitation and press release studio, served at a private, unlisted URL (default /media-studio) as a visual HTML editor with autosaving projects.
  * Version:           1.0.0
  * Requires at least: 6.0
@@ -19,7 +19,7 @@ define('SMS_VERSION', '1.0.0');
 define('SMS_FILE', __FILE__);
 define('SMS_DIR', plugin_dir_path(__FILE__));
 define('SMS_URL', plugin_dir_url(__FILE__));
-define('SMS_REPO', 'md-alaminIslam/pr-and-media-invitation');
+define('SMS_REPO', 'savorbd/savor-media-studio');
 
 require_once SMS_DIR . 'includes/class-sms-storage.php';
 require_once SMS_DIR . 'includes/class-sms-limits.php';
@@ -46,6 +46,8 @@ function sms_settings() {
 		'anthropic_model'  => '',
 		'openai_key'       => '',
 		'openai_model'     => '',
+		'openrouter_key'   => '',
+		'openrouter_model' => '',
 		'mcp_enabled'      => false,
 		'mcp_token'        => '',
 	);

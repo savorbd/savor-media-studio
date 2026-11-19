@@ -1,7 +1,7 @@
 <?php
 /**
  * English → Bangla translation through an AI provider: Google Gemini,
- * Anthropic Claude or OpenAI ChatGPT. Keys stay on the server; the browser
+ * Anthropic Claude, OpenAI ChatGPT or OpenRouter (free models). Keys stay on the server; the browser
  * never sees them. Configure in Settings → Media Studio.
  */
 
@@ -18,11 +18,61 @@ class SMS_Translate {
 		'gemini'    => array('label' => 'Gemini', 'model' => 'gemini-3.5-flash'),
 		'anthropic' => array('label' => 'Claude', 'model' => 'claude-sonnet-5-5'),
 		'openai'    => array('label' => 'ChatGPT', 'model' => 'gpt-5-mini'),
+		'openrouter' => array('label' => 'OpenRouter', 'model' => 'openrouter/free'),
 	);
+
+	/** OpenRouter free models, best for formal Bangla first (the free list changes often; unknown ones go last). */
+	const OPENROUTER_PREFER = array('gemma-4', 'gpt-oss-120b', 'nemotron-3-ultra', 'qwen3', 'llama-4', 'deepseek', 'glm', 'kimi', 'minimax', 'mistral', 'gemma-3', 'llama-3.3', 'gpt-oss', 'nemotron');
+
+	/** Live list of OpenRouter's free text models (cached 6 hours), best first. */
+	public static function openrouter_free_models($refresh = false) {
+		$cached = get_transient('sms_or_free_models');
+		if (!$refresh && is_array($cached) && $cached) {
+			return $cached;
+		}
+		$res = wp_remote_get('https://openrouter.ai/api/v1/models', array('timeout' => 20));
+		if (is_wp_error($res) || 200 !== wp_remote_retrieve_response_code($res)) {
+			return is_array($cached) ? $cached : array();
+		}
+		$rank = array();
+		foreach ((array) (json_decode(wp_remote_retrieve_body($res), true)['data'] ?? array()) as $m) {
+			$id  = (string) ($m['id'] ?? '');
+			$pr  = (array) ($m['pricing'] ?? array());
+			$out = (array) ($m['architecture']['output_modalities'] ?? array('text'));
+			$free = ':free' === substr($id, -5) || ('0' === (string) ($pr['prompt'] ?? '1') && '0' === (string) ($pr['completion'] ?? '1') && 'openrouter/free' !== $id);
+			if (!$free || !in_array('text', $out, true) || (int) ($m['context_length'] ?? 0) < 16000 || preg_match('/coder|vision-only|embed|guard|safety|image|audio|tts/i', $id)) {
+				continue;
+			}
+			$score = count(self::OPENROUTER_PREFER);
+			foreach (self::OPENROUTER_PREFER as $i => $needle) {
+				if (false !== stripos($id, $needle)) {
+					$score = $i;
+					break;
+				}
+			}
+			$rank[$id] = $score * 1000000 - min(999999, (int) ($m['context_length'] ?? 0) / 1000);
+		}
+		asort($rank);
+		$list = array_keys($rank);
+		if ($list) {
+			set_transient('sms_or_free_models', $list, 6 * HOUR_IN_SECONDS);
+		}
+		return $list;
+	}
+
+	/** Comma-separated model lists → groups of up to 3 (OpenRouter tries each group's models in order). */
+	private static function openrouter_groups($models) {
+		$models = array_values(array_unique(array_filter(array_map('trim', $models))));
+		$groups = array();
+		foreach (array_chunk($models, 3) as $chunk) {
+			$groups[] = implode(',', $chunk);
+		}
+		return $groups;
+	}
 
 	/** API key for a provider: wp-config constant first, then the settings page. */
 	public static function key($provider) {
-		$const = array('gemini' => 'SMS_GEMINI_API_KEY', 'anthropic' => 'SMS_ANTHROPIC_API_KEY', 'openai' => 'SMS_OPENAI_API_KEY');
+		$const = array('gemini' => 'SMS_GEMINI_API_KEY', 'anthropic' => 'SMS_ANTHROPIC_API_KEY', 'openai' => 'SMS_OPENAI_API_KEY', 'openrouter' => 'SMS_OPENROUTER_API_KEY');
 		if (isset($const[$provider]) && defined($const[$provider]) && constant($const[$provider])) {
 			return (string) constant($const[$provider]);
 		}
@@ -135,6 +185,34 @@ class SMS_Translate {
 			}
 			return array((int) wp_remote_retrieve_response_code($res), $text, $data);
 		}
+		if ('openrouter' === $provider) {
+			$list = array_values(array_filter(array_map('trim', explode(',', $model))));
+			$body = array(
+				'model'           => $list[0],
+				'messages'        => array(array('role' => 'system', 'content' => $system), array('role' => 'user', 'content' => $input)),
+				'temperature'     => 0.1,
+				'max_tokens'      => 'html' === $mode ? 16000 : 6000,
+				'response_format' => array('type' => 'json_object'),
+			);
+			if (count($list) > 1) {
+				$body['models'] = $list; // OpenRouter falls back to the next model on rate limits or errors
+			}
+			$res = wp_remote_post('https://openrouter.ai/api/v1/chat/completions', array(
+				'timeout' => $timeout,
+				'headers' => array('Content-Type' => 'application/json', 'Authorization' => 'Bearer ' . $key, 'HTTP-Referer' => home_url('/'), 'X-Title' => 'SAVOR Media Studio'),
+				'body'    => wp_json_encode($body, JSON_UNESCAPED_UNICODE),
+			));
+			if (is_wp_error($res)) {
+				return $res;
+			}
+			$data = json_decode(wp_remote_retrieve_body($res), true);
+			$code = (int) wp_remote_retrieve_response_code($res);
+			if (200 === $code && (!empty($data['error']) || empty($data['choices'][0]['message']['content']))) {
+				$code = (int) ($data['error']['code'] ?? 502); // upstream failure reported inside a 200
+				$code = $code >= 400 ? $code : 502;
+			}
+			return array($code, (string) ($data['choices'][0]['message']['content'] ?? ''), $data, (string) ($data['model'] ?? ''));
+		}
 		$res = wp_remote_post('https://api.openai.com/v1/chat/completions', array(
 			'timeout' => $timeout,
 			'headers' => array('Content-Type' => 'application/json', 'Authorization' => 'Bearer ' . $key),
@@ -180,6 +258,8 @@ class SMS_Translate {
 					}
 				}
 			}
+		} elseif ('openrouter' === $provider) {
+			$names = self::openrouter_groups(array_diff(self::openrouter_free_models(true), array($current)));
 		} else {
 			$res = wp_remote_get('https://api.openai.com/v1/models', array('timeout' => 15, 'headers' => array('Authorization' => 'Bearer ' . $key)));
 			$names = array();
@@ -199,6 +279,17 @@ class SMS_Translate {
 	/** Models to try, in order: the one that worked last, a known-good default, then what the account offers. */
 	private static function candidates($provider, $key) {
 		$configured = (string) (sms_settings()[$provider . '_model'] ?? '');
+		if ('openrouter' === $provider) {
+			if ('' !== $configured) {
+				return array_merge(self::openrouter_groups(explode(',', $configured)), array('openrouter/free'));
+			}
+			$found = (string) get_option('sms_model_found_openrouter', '');
+			$free  = self::openrouter_free_models();
+			if ('' !== $found && !in_array($found, $free, true)) {
+				$found = ''; // that model is no longer free
+			}
+			return array_merge(self::openrouter_groups(array_merge(array($found), array_slice($free, 0, 8))), array('openrouter/free'));
+		}
 		if ('' !== $configured) {
 			return array($configured);
 		}
@@ -213,11 +304,11 @@ class SMS_Translate {
 
 	/** Should we try another model after this response? (not for a bad key or a broken request) */
 	private static function try_next($code, $data) {
-		if (!in_array($code, array(400, 403, 404, 429, 500, 503), true)) {
+		if (!in_array($code, array(400, 402, 403, 404, 408, 429, 500, 502, 503, 504), true)) {
 			return false;
 		}
 		$msg = is_array($data) ? (string) ($data['error']['message'] ?? '') : '';
-		return !preg_match('/api[ _]?key|permission_denied|unauthori[sz]ed|invalid x-api-key|incorrect api key/i', $msg);
+		return !preg_match('/api[ _]?key|permission_denied|unauthori[sz]ed|invalid x-api-key|incorrect api key|user not found|no auth credentials/i', $msg);
 	}
 
 	private static function provider_error($provider, $code, $data, $model = '') {
@@ -225,10 +316,17 @@ class SMS_Translate {
 		$detail = '';
 		if (is_array($data)) {
 			$detail = (string) ($data['error']['message'] ?? ($data['error']['type'] ?? ''));
+			$raw    = $data['error']['metadata']['raw'] ?? '';
+			if (is_string($raw) && '' !== $raw && false === strpos($detail, $raw)) {
+				$detail .= ': ' . $raw;
+			}
 		}
 		$detail = $detail ? ' (' . wp_strip_all_tags(mb_substr($detail, 0, 400)) . ')' : '';
 		if (in_array($code, array(400, 401, 403), true)) {
 			return $label . ' rejected the request — check the API key and its permissions in Settings → Media Studio.' . $detail;
+		}
+		if ('openrouter' === $provider && 429 === $code) {
+			return $label . ' free-model limit reached (free models allow about 20 requests a minute and 50 a day; 1,000 a day after buying $10 of OpenRouter credit). Try again in a minute, or use another AI.' . $detail;
 		}
 		if (429 === $code) {
 			return $label . ' quota or rate limit reached. Try again later or check billing with the provider.' . $detail;
@@ -237,6 +335,33 @@ class SMS_Translate {
 			return $label . ' model not found. Set a valid model in Settings → Media Studio.' . $detail;
 		}
 		return $label . ' did not respond (HTTP ' . $code . ').' . $detail;
+	}
+
+	/** The model's reply → validated translations, or null when it is not a complete answer. */
+	private static function parse_translations($raw, $fields) {
+		$text = trim((string) $raw);
+		$text = trim(preg_replace('#<think>.*?</think>#s', '', $text));
+		$text = preg_replace('/^```(?:json)?\s*|\s*```$/', '', $text);
+		if (null === json_decode($text, true) && false !== ($a = strpos($text, '{')) && false !== ($b = strrpos($text, '}'))) {
+			$text = substr($text, $a, $b - $a + 1); // the JSON inside any extra words
+		}
+		$parsed       = json_decode($text, true);
+		$translations = is_array($parsed) ? ($parsed['translations'] ?? null) : null;
+		$ids          = array();
+		foreach ($fields as $f) {
+			$ids[$f['id']] = true;
+		}
+		if (!is_array($translations) || count($translations) !== count($fields)) {
+			return null;
+		}
+		$seen = array();
+		foreach ($translations as $t) {
+			if (!is_array($t) || !isset($ids[$t['id'] ?? '']) || !is_string($t['text'] ?? null) || '' === trim($t['text']) || mb_strlen($t['text']) > 60000 || isset($seen[$t['id']])) {
+				return null;
+			}
+			$seen[$t['id']] = true;
+		}
+		return $translations;
 	}
 
 	/** Returns array('translations'=>…, 'provider'=>…, 'model'=>…) or WP_Error. */
@@ -261,8 +386,8 @@ class SMS_Translate {
 			@set_time_limit(300); // phpcs:ignore WordPress.PHP.NoSilencedErrors
 		}
 		$timeouts = 0;
-		while (count($tried) < 5) {
-			if (!$queue && !$discovered && '' === $configured) {
+		while (count($tried) < ('openrouter' === $provider ? 4 : 5)) {
+			if (!$queue && !$discovered && '' === $configured && 'openrouter' !== $provider) {
 				$discovered = true;
 				$queue      = array_values(array_diff(self::discover_model($provider, $key, ''), $tried));
 			}
@@ -271,13 +396,20 @@ class SMS_Translate {
 			}
 			$model   = array_shift($queue);
 			$tried[] = $model;
-			$res     = self::call($provider, $model, $key, $fields, $mode, 'html' === $mode ? 90 : 45);
+			$res     = self::call($provider, $model, $key, $fields, $mode, 'openrouter' === $provider ? ('html' === $mode ? 120 : 75) : ('html' === $mode ? 90 : 45));
 			if (!is_wp_error($res) && 200 === $res[0]) {
+				if ('openrouter' === $provider && $queue && null === self::parse_translations($res[1], $fields)) {
+					$res = array(502, '', array('error' => array('message' => 'The free model returned an incomplete answer.')), '');
+					if (!$first_fail) {
+						$first_fail = array($res, $model);
+					}
+					continue; // a free model gave a broken answer — ask the next group
+				}
 				break;
 			}
 			if (is_wp_error($res)) {
 				// Network timeout: this model may be overloaded — try another one (at most twice).
-				if ('' !== $configured || ++$timeouts >= 2) {
+				if (('' !== $configured && 'openrouter' !== $provider) || ++$timeouts >= 2) {
 					break;
 				}
 				continue;
@@ -285,7 +417,7 @@ class SMS_Translate {
 			if (!$first_fail) {
 				$first_fail = array($res, $model);
 			}
-			if ('' !== $configured || !self::try_next($res[0], $res[2])) {
+			if (('' !== $configured && 'openrouter' !== $provider) || !self::try_next($res[0], $res[2])) {
 				break;
 			}
 		}
@@ -301,30 +433,15 @@ class SMS_Translate {
 			}
 			return new WP_Error('sms_ai_error', $msg, array('status' => 502, 'providerStatus' => $fail[0]));
 		}
-		if ('' === $configured) {
-			update_option('sms_model_found_' . $provider, $model, false);
+		if ('openrouter' === $provider) {
+			$model = '' !== ($res[3] ?? '') ? $res[3] : explode(',', $model)[0]; // the model that actually answered
 		}
-		$text = trim($res[1]);
-		$text = preg_replace('/^```(?:json)?\s*|\s*```$/', '', $text);
-		$parsed = json_decode($text, true);
-		$translations = is_array($parsed) ? ($parsed['translations'] ?? null) : null;
-		$ids = array();
-		foreach ($fields as $f) {
-			$ids[$f['id']] = true;
-		}
-		$seen = array();
-		$ok = is_array($translations) && count($translations) === count($fields);
-		if ($ok) {
-			foreach ($translations as $t) {
-				if (!is_array($t) || !isset($ids[$t['id'] ?? '']) || !is_string($t['text'] ?? null) || '' === trim($t['text']) || mb_strlen($t['text']) > 60000 || isset($seen[$t['id']])) {
-					$ok = false;
-					break;
-				}
-				$seen[$t['id']] = true;
-			}
-		}
-		if (!$ok) {
+		$translations = self::parse_translations($res[1], $fields);
+		if (null === $translations) {
 			return new WP_Error('sms_ai_partial', $label . ' returned an incomplete translation. Nothing was changed; try again.', array('status' => 502));
+		}
+		if ('' === $configured && 'openrouter/free' !== $model) {
+			update_option('sms_model_found_' . $provider, $model, false);
 		}
 		return array(
 			'translations' => array_map(function ($t) {

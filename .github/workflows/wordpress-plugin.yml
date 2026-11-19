@@ -31,7 +31,7 @@ jobs:
       - name: Set plugin version
         id: version
         run: |
-          VERSION="1.0.${{ github.run_number }}"
+          VERSION="1.1.${{ github.run_number }}"
           sed -i "s/^ \* Version: .*/ * Version:           $VERSION/" wordpress-plugin/savor-media-studio/savor-media-studio.php
           sed -i "s/define('SMS_VERSION', '[^']*')/define('SMS_VERSION', '$VERSION')/" wordpress-plugin/savor-media-studio/savor-media-studio.php
           grep -q "$VERSION" wordpress-plugin/savor-media-studio/savor-media-studio.php
