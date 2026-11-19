@@ -12,6 +12,32 @@ class SMS_Admin {
 		add_action('admin_menu', array(__CLASS__, 'menu'));
 		add_action('admin_init', array(__CLASS__, 'register'));
 		add_filter('plugin_action_links_' . plugin_basename(SMS_FILE), array(__CLASS__, 'links'));
+		add_action('wp_ajax_sms_test_ai', array(__CLASS__, 'ajax_test'));
+	}
+
+	/** Settings → Test: translate a sample in the background and answer in place (no blank page while the AI thinks). */
+	public static function ajax_test() {
+		if (!current_user_can('manage_options') || !check_ajax_referer('sms_test', 'nonce', false)) {
+			wp_send_json_error(array('message' => 'Not allowed. Reload the page and try again.'), 403);
+		}
+		$pid = sanitize_key(wp_unslash($_POST['provider'] ?? ''));
+		if (!isset(SMS_Translate::PROVIDERS[$pid])) {
+			wp_send_json_error(array('message' => 'Unknown AI.'), 400);
+		}
+		$label = SMS_Translate::PROVIDERS[$pid]['label'];
+		$start = microtime(true);
+		$r     = SMS_Translate::translate(array(
+			array('id' => 'a', 'text' => 'Chief Guest: Mr. Md. Anwar Hossain, Hon\'ble Minister, Ministry of Shipping'),
+			array('id' => 'b', 'text' => 'The exhibition will remain open from 10:00 AM to 7:00 PM.'),
+		), 'fields', $pid, 55);
+		$secs = round(microtime(true) - $start, 1);
+		if (is_wp_error($r)) {
+			wp_send_json_error(array('message' => $label . ' is not working right now: ' . $r->get_error_message(), 'seconds' => $secs));
+		}
+		wp_send_json_success(array(
+			'message' => $label . ' is connected and working (model ' . $r['model'] . ', ' . $secs . ' s).',
+			'sample'  => implode("\n", wp_list_pluck($r['translations'], 'text')),
+		));
 	}
 
 	public static function links($links) {
@@ -83,17 +109,6 @@ class SMS_Admin {
 				and each file keeps its last 30 automatic versions.
 			</p>
 			<?php
-			if (isset($_GET['sms_test'], $_GET['_wpnonce']) && wp_verify_nonce(sanitize_text_field(wp_unslash($_GET['_wpnonce'])), 'sms_test')) {
-				$pid = sanitize_key(wp_unslash($_GET['sms_test']));
-				if (isset(SMS_Translate::PROVIDERS[$pid])) {
-					$r = SMS_Translate::translate(array(array('id' => 'test', 'text' => 'Chief Guest: Hon\'ble Minister, Ministry of Commerce')), 'fields', $pid);
-					if (is_wp_error($r)) {
-						echo '<div class="notice notice-error"><p><strong>' . esc_html(SMS_Translate::PROVIDERS[$pid]['label']) . ' test failed.</strong> ' . esc_html($r->get_error_message()) . '</p></div>';
-					} else {
-						echo '<div class="notice notice-success"><p><strong>' . esc_html(SMS_Translate::PROVIDERS[$pid]['label']) . ' works</strong> with model <code>' . esc_html($r['model']) . '</code>: ' . esc_html($r['translations'][0]['text']) . '</p></div>';
-					}
-				}
-			}
 			?>
 			<?php
 			if (isset($_GET['sms_mcp_regen'], $_GET['_wpnonce']) && wp_verify_nonce(sanitize_text_field(wp_unslash($_GET['_wpnonce'])), 'sms_mcp_regen')) {
@@ -136,7 +151,8 @@ class SMS_Admin {
 								<input id="sms-<?php echo esc_attr($pid); ?>-key" type="text" name="sms_settings[<?php echo esc_attr($pid); ?>_key]" value="<?php echo esc_attr($s[$pid . '_key'] ?? ''); ?>" class="regular-text code" autocomplete="off" spellcheck="false" placeholder="<?php echo esc_attr('API key from ' . $info[1]); ?>">
 							<?php endif; ?>
 							<?php if (SMS_Translate::key($pid)) : ?>
-								<a class="button" style="margin-left:6px" href="<?php echo esc_url(wp_nonce_url(admin_url('options-general.php?page=savor-media-studio&sms_test=' . $pid), 'sms_test')); ?>">Test</a>
+								<button type="button" class="button sms-test-ai" style="margin-left:6px" data-provider="<?php echo esc_attr($pid); ?>">Test</button>
+								<div class="sms-test-result" data-for="<?php echo esc_attr($pid); ?>" style="display:none;margin-top:8px;padding:8px 10px;border-left:4px solid #72aee6;background:#fff;white-space:pre-line;max-width:640px"></div>
 							<?php endif; ?>
 							<?php if ('openrouter' === $pid) : ?>
 								<?php $free = SMS_Translate::openrouter_free_models(); ?>
@@ -178,6 +194,35 @@ class SMS_Admin {
 				</table>
 				<?php submit_button(); ?>
 			</form>
+			<script>
+			(function () {
+				var ajax = <?php echo wp_json_encode(admin_url('admin-ajax.php')); ?>, nonce = <?php echo wp_json_encode(wp_create_nonce('sms_test')); ?>;
+				document.querySelectorAll('.sms-test-ai').forEach(function (btn) {
+					btn.addEventListener('click', function () {
+						var pid = btn.getAttribute('data-provider'), box = document.querySelector('.sms-test-result[data-for="' + pid + '"]');
+						var input = document.getElementById('sms-' + pid + '-key');
+						if (input && input.value !== input.defaultValue) {
+							box.style.display = 'block'; box.style.borderLeftColor = '#dba617';
+							box.textContent = 'You changed this key — click Save Changes first, then Test.';
+							return;
+						}
+						btn.disabled = true; btn.textContent = 'Testing…';
+						box.style.display = 'block'; box.style.borderLeftColor = '#72aee6';
+						box.textContent = 'Asking the AI to translate a sample (up to about a minute)…';
+						var body = new FormData(); body.append('action', 'sms_test_ai'); body.append('nonce', nonce); body.append('provider', pid);
+						fetch(ajax, { method: 'POST', body: body, credentials: 'same-origin' })
+							.then(function (r) { return r.json(); })
+							.then(function (j) {
+								var d = j && j.data ? j.data : {};
+								box.style.borderLeftColor = j && j.success ? '#00a32a' : '#d63638';
+								box.textContent = (j && j.success ? '✓ ' : '✗ ') + (d.message || 'No answer.') + (d.sample ? '\n\nSample translation:\n' + d.sample : '');
+							})
+							.catch(function () { box.style.borderLeftColor = '#d63638'; box.textContent = '✗ The test did not finish (the server took too long). Try again in a minute.'; })
+							.then(function () { btn.disabled = false; btn.textContent = 'Test'; });
+					});
+				});
+			})();
+			</script>
 		</div>
 		<?php
 	}

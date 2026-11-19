@@ -87,7 +87,7 @@ class SMS_Translate {
 			return $m;
 		}
 		$found = (string) get_option('sms_model_found_' . $provider, '');
-		return ('' !== $found && ('gemini' !== $provider || preg_match('/^gemini-\d+(\.\d+)?-flash(-preview[-\w]*)?$|^gemini-flash-latest$/', $found))) ? $found : self::PROVIDERS[$provider]['model'];
+		return ('' !== $found && ('gemini' !== $provider || preg_match('/^gemini-\d+(\.\d+)?-flash(-lite)?(-preview[-\w]*)?$|^gemini-flash(-lite)?-latest$/', $found))) ? $found : self::PROVIDERS[$provider]['model'];
 	}
 
 	/** Providers that have a key. */
@@ -237,16 +237,21 @@ class SMS_Translate {
 			if (!is_wp_error($res) && 200 === wp_remote_retrieve_response_code($res)) {
 				foreach ((array) (json_decode(wp_remote_retrieve_body($res), true)['models'] ?? array()) as $m) {
 					$n = preg_replace('#^models/#', '', (string) ($m['name'] ?? ''));
-					if (in_array('generateContent', (array) ($m['supportedGenerationMethods'] ?? array()), true) && preg_match('/^gemini-\d+(\.\d+)?-flash(-preview[-\w]*)?$/', $n)) {
+					if (in_array('generateContent', (array) ($m['supportedGenerationMethods'] ?? array()), true) && preg_match('/^gemini-\d+(\.\d+)?-flash(-lite)?(-preview[-\w]*)?$|^gemini-flash(-lite)?-latest$/', $n)) {
 						$names[] = $n;
 					}
 				}
 			}
 			usort($names, function ($a, $b) {
-				preg_match('/(\d+(?:\.\d+)?)/', $a, $x);
-				preg_match('/(\d+(?:\.\d+)?)/', $b, $y);
-				$v = version_compare($y[1], $x[1]);
-				return $v ? $v : (int) (false !== strpos($a, 'preview')) - (int) (false !== strpos($b, 'preview'));
+				// Newest version first; at the same version full Flash, then Flash-Lite (a different, often less busy model).
+				$x = preg_match('/(\d+(?:\.\d+)?)/', $a, $xm) ? $xm[1] : '0';
+				$y = preg_match('/(\d+(?:\.\d+)?)/', $b, $ym) ? $ym[1] : '0';
+				$v = version_compare($y, $x);
+				if ($v) {
+					return $v;
+				}
+				$l = (int) (false !== strpos($a, '-lite')) - (int) (false !== strpos($b, '-lite'));
+				return $l ? $l : (int) (false !== strpos($a, 'preview')) - (int) (false !== strpos($b, 'preview'));
 			});
 		} elseif ('anthropic' === $provider) {
 			$res = wp_remote_get('https://api.anthropic.com/v1/models?limit=50', array('timeout' => 15, 'headers' => array('x-api-key' => $key, 'anthropic-version' => '2023-06-01')));
@@ -295,7 +300,7 @@ class SMS_Translate {
 		}
 		$list = array();
 		$found = (string) get_option('sms_model_found_' . $provider, '');
-		if ('' !== $found && ('gemini' !== $provider || preg_match('/^gemini-\d+(\.\d+)?-flash(-preview[-\w]*)?$|^gemini-flash-latest$/', $found))) {
+		if ('' !== $found && ('gemini' !== $provider || preg_match('/^gemini-\d+(\.\d+)?-flash(-lite)?(-preview[-\w]*)?$|^gemini-flash(-lite)?-latest$/', $found))) {
 			$list[] = $found;
 		}
 		$list[] = self::PROVIDERS[$provider]['model'];
@@ -365,7 +370,7 @@ class SMS_Translate {
 	}
 
 	/** Returns array('translations'=>…, 'provider'=>…, 'model'=>…) or WP_Error. */
-	public static function translate($fields, $mode = 'fields', $provider = '') {
+	public static function translate($fields, $mode = 'fields', $provider = '', $budget = 0) {
 		$provider = $provider ? $provider : self::default_provider();
 		if (!isset(self::PROVIDERS[$provider])) {
 			return new WP_Error('sms_no_key', 'No AI provider is set up. Add an API key in WordPress → Settings → Media Studio.', array('status' => 503));
@@ -386,7 +391,9 @@ class SMS_Translate {
 			@set_time_limit(300); // phpcs:ignore WordPress.PHP.NoSilencedErrors
 		}
 		$timeouts = 0;
-		while (count($tried) < ('openrouter' === $provider ? 4 : 5)) {
+		// Give up before the studio stops waiting (150 s); the settings Test allows 40 s.
+		$deadline = time() + ($budget ? (int) $budget : 140);
+		while (count($tried) < ('openrouter' === $provider ? 4 : 6) && time() < $deadline - 5) {
 			if (!$queue && !$discovered && '' === $configured && 'openrouter' !== $provider) {
 				$discovered = true;
 				$queue      = array_values(array_diff(self::discover_model($provider, $key, ''), $tried));
@@ -396,7 +403,8 @@ class SMS_Translate {
 			}
 			$model   = array_shift($queue);
 			$tried[] = $model;
-			$res     = self::call($provider, $model, $key, $fields, $mode, 'openrouter' === $provider ? ('html' === $mode ? 120 : 75) : ('html' === $mode ? 90 : 45));
+			$limit   = 'openrouter' === $provider ? ('html' === $mode ? 120 : 75) : ('html' === $mode ? 90 : 45);
+			$res     = self::call($provider, $model, $key, $fields, $mode, max(8, min($limit, $deadline - time())));
 			if (!is_wp_error($res) && 200 === $res[0]) {
 				if ('openrouter' === $provider && $queue && null === self::parse_translations($res[1], $fields)) {
 					$res = array(502, '', array('error' => array('message' => 'The free model returned an incomplete answer.')), '');
