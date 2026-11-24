@@ -1023,27 +1023,141 @@ class SMS_History {
 			foreach ($hunks as $h) {
 				$byat[$h['at']] = $h;
 			}
-			$skip = 0;
-			$kind = 'chg';
-			foreach ($ab as $j => $blk) {
+			$n = count($ab);
+			for ($j = 0; $j <= $n; $j++) {
 				if (isset($byat[$j])) {
-					foreach ($byat[$j]['before'] as $old) {
-						$parts[] = '<div data-sv-diff="del">' . $old['html'] . '</div>';
+					$h     = $byat[$j];
+					$pairs = min(count($h['before']), count($h['after']));
+					for ($x = $pairs; $x < count($h['before']); $x++) {
+						$parts[] = '<div data-sv-diff="del">' . $h['before'][$x]['html'] . '</div>';
 					}
-					$skip = count($byat[$j]['after']);
-					$kind = $byat[$j]['before'] ? 'chg' : 'add';
+					foreach ($h['after'] as $x => $blk) {
+						// A changed paragraph: mark the words that changed, not the whole paragraph.
+						$marked  = $x < $pairs ? self::word_mark($h['before'][$x]['html'], $blk['html']) : null;
+						$parts[] = $x >= $pairs ? '<div data-sv-diff="add">' . $blk['html'] . '</div>'
+							: (null === $marked ? '<div data-sv-diff="chg">' . $blk['html'] . '</div>' : '<div data-sv-diff="edit">' . $marked . '</div>');
+					}
+					if ($h['after']) {
+						$j += count($h['after']) - 1;
+						continue;
+					}
 				}
-				$parts[] = $skip > 0 ? '<div data-sv-diff="' . $kind . '">' . $blk['html'] . '</div>' : $blk['html'];
-				$skip    = max(0, $skip - 1);
-			}
-			if (isset($byat[count($ab)])) {
-				foreach ($byat[count($ab)]['before'] as $old) {
-					$parts[] = '<div data-sv-diff="del">' . $old['html'] . '</div>';
+				if ($j < $n) {
+					$parts[] = $ab[$j]['html'];
 				}
 			}
 			$model['body'] = implode('', $parts);
 		}
 		return $out + array('html' => SMS_Doc::serialize($model), 'changes' => $count);
+	}
+
+	/**
+	 * The new version of a paragraph with the words added since the old one
+	 * wrapped in <span data-sv-w="add"> and the removed words shown in place in
+	 * <span data-sv-w="del">. Null when there is too much to compare.
+	 */
+	private static function word_mark($before_html, $after_html) {
+		list($bdom, $broot) = SMS_Doc::load_fragment($before_html);
+		list($dom, $root)   = SMS_Doc::load_fragment($after_html);
+		if (!$broot || !$root) {
+			return null;
+		}
+		$nodes = array();
+		$walk  = function ($n) use (&$walk, &$nodes) {
+			foreach (iterator_to_array($n->childNodes) as $c) {
+				if (XML_TEXT_NODE === $c->nodeType) {
+					$nodes[] = $c;
+				} elseif (XML_ELEMENT_NODE === $c->nodeType && !in_array(strtolower($c->nodeName), array('style', 'script'), true)) {
+					$walk($c);
+				}
+			}
+		};
+		$walk($root);
+		$split = function ($t) {
+			// Words, runs of spaces and single punctuation marks (text is split across tags at such places).
+			return preg_split('/(\s+|[^\p{L}\p{M}\p{N}\s])/u', $t, -1, PREG_SPLIT_DELIM_CAPTURE | PREG_SPLIT_NO_EMPTY) ?: array();
+		};
+		$a = array(); // array(token, node index)
+		foreach ($nodes as $i => $node) {
+			foreach ($split($node->nodeValue) as $tok) {
+				$a[] = array($tok, $i);
+			}
+		}
+		$b = $split($broot->textContent);
+		$N = count($b);
+		$M = count($a);
+		if (!$M || $N * $M > 250000) {
+			return null;
+		}
+		$L = array_fill(0, $N + 1, array_fill(0, $M + 1, 0));
+		for ($i = $N - 1; $i >= 0; $i--) {
+			for ($j = $M - 1; $j >= 0; $j--) {
+				$L[$i][$j] = $b[$i] === $a[$j][0] ? $L[$i + 1][$j + 1] + 1 : max($L[$i + 1][$j], $L[$i][$j + 1]);
+			}
+		}
+		// Pieces per text node: array(kind, text), kind eq|add|del.
+		$pieces  = array_fill(0, count($nodes), array());
+		$pending = array(); // removed words waiting for the next node with new text
+		$i       = 0;
+		$j       = 0;
+		$changed = false;
+		$put     = function ($node, $kind, $text) use (&$pieces) {
+			$last = count($pieces[$node]) - 1;
+			if ($last >= 0 && $pieces[$node][$last][0] === $kind) {
+				$pieces[$node][$last][1] .= $text;
+			} else {
+				$pieces[$node][] = array($kind, $text);
+			}
+		};
+		while ($i < $N || $j < $M) {
+			if ($i < $N && $j < $M && $b[$i] === $a[$j][0]) {
+				foreach ($pending as $d) {
+					$put($a[$j][1], 'del', $d);
+				}
+				$pending = array();
+				$put($a[$j][1], 'eq', $a[$j][0]);
+				$i++;
+				$j++;
+			} elseif ($i < $N && ($j >= $M || $L[$i + 1][$j] >= $L[$i][$j + 1])) {
+				if ('' !== trim($b[$i])) {
+					$pending[] = $b[$i];
+					$changed   = true;
+				} elseif ($pending) {
+					$pending[count($pending) - 1] .= $b[$i];
+				}
+				$i++;
+			} else {
+				foreach ($pending as $d) {
+					$put($a[$j][1], 'del', $d);
+				}
+				$pending = array();
+				$ws = '' === trim($a[$j][0]);
+				$put($a[$j][1], $ws ? 'eq' : 'add', $a[$j][0]);
+				$changed = $changed || !$ws;
+				$j++;
+			}
+		}
+		foreach ($pending as $d) {
+			$put(count($nodes) - 1, 'del', $d);
+		}
+		if (!$changed) {
+			return $after_html;
+		}
+		foreach ($nodes as $k => $node) {
+			$frag = $dom->createDocumentFragment();
+			foreach ($pieces[$k] as $p) {
+				if ('eq' === $p[0]) {
+					$frag->appendChild($dom->createTextNode($p[1]));
+				} else {
+					$span = $dom->createElement('span');
+					$span->setAttribute('data-sv-w', $p[0]);
+					$span->appendChild($dom->createTextNode($p[1]));
+					$frag->appendChild($span);
+				}
+			}
+			$node->parentNode->replaceChild($frag, $node);
+		}
+		return SMS_Doc::inner_html($dom, $root);
 	}
 
 	/** Every shared value as people read it, with the ones changed since $before flagged. */

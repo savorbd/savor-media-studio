@@ -1,7 +1,8 @@
 /** Word-level difference between two texts, for showing what a version changed. */
 export type DiffPart = { t: 'eq' | 'add' | 'del'; s: string };
 
-const tokens = (s: string) => s.match(/\s+|[^\s]+/g) || [];
+// Words, runs of spaces and single punctuation marks.
+const tokens = (s: string) => s.match(/\s+|[\p{L}\p{M}\p{N}]+|[^\s\p{L}\p{M}\p{N}]/gu) || [];
 
 export function wordDiff(before: string, after: string): DiffPart[] {
   if (before === after) return before ? [{ t: 'eq', s: before }] : [];
