@@ -685,7 +685,7 @@ class SMS_History {
 		$out = array(
 			'n' => $v['n'], 'code' => self::code($v['n']), 'time' => gmdate('c', $v['time']), 'end' => gmdate('c', $v['end']),
 			'source' => $v['source'], 'author' => (string) $v['author'], 'tag' => (string) $v['tag'], 'desc' => (string) $v['desc'],
-			'open' => empty($v['sealed']), 'changes' => $changes, 'heads' => $heads ? $heads : new stdClass(),
+			'open' => empty($v['sealed']) && time() - (int) $v['end'] <= self::GROUP_GAP, 'changes' => $changes, 'heads' => $heads ? $heads : new stdClass(),
 		);
 		foreach (array('restored_from', 'step_track') as $k) {
 			if (isset($v[$k])) {
