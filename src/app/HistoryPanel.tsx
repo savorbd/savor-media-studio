@@ -133,8 +133,22 @@ export function VersionInfoDialog({ open, title, description, initial, submit, o
 
 /* ---------- Diff rendering ---------- */
 
-export function DiffText({ before, after }: { before?: string; after?: string }) {
-  const parts = useMemo(() => wordDiff(before || '', after || ''), [before, after]);
+const CONTEXT = 48;
+/** Long unchanged stretches are shortened so the changed words stand out. */
+function trimEq(s: string, first: boolean, last: boolean) {
+  if (s.length <= CONTEXT * 2 + 10) return s;
+  if (first && last) return s;
+  if (first) return '… ' + s.slice(-CONTEXT).replace(/^\S*\s/, '');
+  if (last) return s.slice(0, CONTEXT).replace(/\s\S*$/, '') + ' …';
+  return s.slice(0, CONTEXT).replace(/\s\S*$/, '') + ' … ' + s.slice(-CONTEXT).replace(/^\S*\s/, '');
+}
+
+export function DiffText({ before, after, full }: { before?: string; after?: string; full?: boolean }) {
+  const parts = useMemo(() => {
+    const p = wordDiff(before || '', after || '');
+    if (full || !before || !after) return p;
+    return p.map((x, i) => (x.t === 'eq' ? { ...x, s: trimEq(x.s, i === 0, i === p.length - 1) } : x));
+  }, [before, after, full]);
   if (!parts.length) return <span className="italic text-zinc-400">(empty)</span>;
   return (
     <>
@@ -451,6 +465,9 @@ body.sv-doc{margin:16px auto!important;box-shadow:0 1px 3px rgba(0,0,0,.08),0 8p
 [data-sv-diff=add]{background:#dcfce7;box-shadow:-6px 0 0 #22c55e}
 [data-sv-diff=chg]{background:#fef9c3;box-shadow:-6px 0 0 #eab308}
 [data-sv-diff=del]{background:#fee2e2;box-shadow:-6px 0 0 #ef4444;text-decoration:line-through;text-decoration-color:#f87171;opacity:.75}
+[data-sv-diff=edit]{box-shadow:-6px 0 0 #eab308}
+[data-sv-w=add]{background:#bbf7d0;color:#14532d;border-radius:2px;box-shadow:0 0 0 1px #86efac}
+[data-sv-w=del]{background:#fecaca;color:#7f1d1d;border-radius:2px;text-decoration:line-through;text-decoration-color:#dc2626}
 </style>`;
 export const withPreviewCss = (html: string, extra = '') => html.replace('</head>', PREVIEW_CSS + extra + '</head>');
 

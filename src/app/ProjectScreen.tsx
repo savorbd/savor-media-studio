@@ -487,10 +487,12 @@ export function ProjectScreen({ store, project, file, onNavigate, onClose }: { s
     flushEditor();
     if (mode === 'code') applyCode();
     if (!(await p.saveAll())) { toast('Could not save your latest changes first', { tone: 'error', description: 'Try again in a moment.' }); return null; }
+    setStepping(s => s || 'project');
     try {
       const r = await fn();
       ownSync.current = true;
-      await p.syncNow();
+      // Load the restored pages; never wait forever on a slow connection.
+      await Promise.race([p.syncNow(), new Promise(res => window.setTimeout(res, 12000))]);
       window.setTimeout(() => { ownSync.current = false; }, 800);
       setInfo({ head: r.head, tracks: r.tracks });
       if (r.version) {
@@ -502,11 +504,11 @@ export function ProjectScreen({ store, project, file, onNavigate, onClose }: { s
     } catch (e: any) {
       toast('Could not do that', { tone: 'error', description: e?.message });
       return null;
-    }
+    } finally { setStepping(null); }
   };
   const stepVersion = async (dir: 'back' | 'forward', track = '') => {
     setStepping(track || 'project');
-    try { await runHistory('', () => studioApi.historyStep(project, dir, track)); } finally { setStepping(null); }
+    await runHistory('', () => studioApi.historyStep(project, dir, track));
   };
   const restoreVersion = async (scope: HistoryScope, v: AnyVersion) => {
     const t = scope === 'project' ? null : info?.tracks.find(x => x.track === scope);
