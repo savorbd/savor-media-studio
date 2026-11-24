@@ -16,6 +16,13 @@ class SMS_Rest {
 
 	public static function init() {
 		add_action('rest_api_init', array(__CLASS__, 'routes'));
+		// The studio sends the editor's name (URL-encoded) so versions can show who made them.
+		add_filter('rest_pre_dispatch', function ($result, $server, $request) {
+			if (0 === strpos((string) $request->get_route(), '/' . self::NS . '/')) {
+				SMS_History::set_author(rawurldecode((string) $request->get_header('x-studio-author')));
+			}
+			return $result;
+		}, 10, 3);
 	}
 
 	public static function routes() {
@@ -72,14 +79,14 @@ class SMS_Rest {
 			'callback'            => array(__CLASS__, 'version'),
 			'permission_callback' => $read,
 		));
-		foreach (array('' => 'history_list', '/version' => 'history_version', '/preview' => 'history_preview') as $r => $cb) {
+		foreach (array('' => 'history_list', '/version' => 'history_version', '/compare' => 'history_compare', '/render' => 'history_render') as $r => $cb) {
 			register_rest_route(self::NS, '/history' . $r, array(
 				'methods'             => 'GET',
 				'callback'            => array(__CLASS__, $cb),
 				'permission_callback' => $read,
 			));
 		}
-		foreach (array('commit', 'info', 'restore', 'step', 'undo') as $r) {
+		foreach (array('commit', 'info', 'restore', 'step') as $r) {
 			register_rest_route(self::NS, '/history/' . $r, array(
 				'methods'             => 'POST',
 				'callback'            => array(__CLASS__, 'history_' . $r),
@@ -194,46 +201,48 @@ class SMS_Rest {
 		return self::respond(self::storage()->read_version($path, $request->get_param('id')));
 	}
 
-	/* ---- Version history (one log per project) ---- */
+	/* ---- Version history ---- */
 
 	private static function hp($value) {
 		self::storage();
 		return SMS_Project::require_project($value);
 	}
 
+	private static function str($body, $key) {
+		return isset($body[$key]) && is_string($body[$key]) ? $body[$key] : null;
+	}
+
 	public static function history_list(WP_REST_Request $request) {
 		$p = self::hp($request->get_param('project'));
-		return is_wp_error($p) ? $p : self::respond(SMS_History::listing($p, (int) ($request->get_param('limit') ?: 100), (int) $request->get_param('before')));
+		return is_wp_error($p) ? $p : self::respond(SMS_History::listing($p, (string) $request->get_param('track'), (int) ($request->get_param('limit') ?: 200), (int) $request->get_param('before')));
 	}
 
 	public static function history_version(WP_REST_Request $request) {
 		$p = self::hp($request->get_param('project'));
-		return is_wp_error($p) ? $p : self::respond(SMS_History::version_detail($p, (int) $request->get_param('n')));
+		return is_wp_error($p) ? $p : self::respond(SMS_History::detail($p, (int) $request->get_param('n'), (string) $request->get_param('track')));
 	}
 
-	public static function history_preview(WP_REST_Request $request) {
+	public static function history_compare(WP_REST_Request $request) {
 		$p = self::hp($request->get_param('project'));
-		if (is_wp_error($p)) {
-			return $p;
-		}
-		$f = SMS_Project::doc_path($p, $request->get_param('file'));
-		return is_wp_error($f) ? $f : self::respond(SMS_History::preview($p, (int) $request->get_param('n'), basename($f)));
+		return is_wp_error($p) ? $p : self::respond(SMS_History::compare($p, (int) $request->get_param('a'), (int) $request->get_param('b'), (string) $request->get_param('track')));
 	}
 
-	private static function str($body, $key) {
-		return isset($body[$key]) && is_string($body[$key]) ? $body[$key] : null;
+	public static function history_render(WP_REST_Request $request) {
+		$p = self::hp($request->get_param('project'));
+		$against = $request->get_param('against');
+		return is_wp_error($p) ? $p : self::respond(SMS_History::render($p, (string) $request->get_param('track'), (int) $request->get_param('k'), null === $against || '' === $against ? null : (int) $against));
 	}
 
 	public static function history_commit(WP_REST_Request $request) {
 		$b = $request->get_json_params();
 		$p = self::hp($b['project'] ?? null);
-		return is_wp_error($p) ? $p : self::respond(SMS_History::commit($p, self::str($b, 'tag'), self::str($b, 'description')));
+		return is_wp_error($p) ? $p : self::respond(SMS_History::commit($p, self::str($b, 'tag'), self::str($b, 'description'), self::str($b, 'author')));
 	}
 
 	public static function history_info(WP_REST_Request $request) {
 		$b = $request->get_json_params();
 		$p = self::hp($b['project'] ?? null);
-		return is_wp_error($p) ? $p : self::respond(SMS_History::set_info($p, (int) ($b['n'] ?? 0), self::str($b, 'tag'), self::str($b, 'description')));
+		return is_wp_error($p) ? $p : self::respond(SMS_History::set_info($p, (int) ($b['n'] ?? 0), (string) (self::str($b, 'track') ?? ''), self::str($b, 'tag'), self::str($b, 'description'), self::str($b, 'author')));
 	}
 
 	public static function history_restore(WP_REST_Request $request) {
@@ -242,20 +251,14 @@ class SMS_Rest {
 		if (is_wp_error($p)) {
 			return $p;
 		}
-		$files = array_values(array_filter((array) ($b['files'] ?? array()), function ($f) { return is_string($f) && preg_match('/^[^\/]+\.html$/i', $f); }));
-		return self::respond(SMS_History::restore($p, (int) ($b['n'] ?? 0), $files));
+		$t = (string) (self::str($b, 'track') ?? '');
+		return self::respond('' === $t ? SMS_History::restore($p, (int) ($b['n'] ?? 0)) : SMS_History::restore_track($p, $t, (int) ($b['n'] ?? 0)));
 	}
 
 	public static function history_step(WP_REST_Request $request) {
 		$b = $request->get_json_params();
 		$p = self::hp($b['project'] ?? null);
-		return is_wp_error($p) ? $p : self::respond(SMS_History::step($p, 'forward' === ($b['direction'] ?? '') ? 'forward' : 'back'));
-	}
-
-	public static function history_undo(WP_REST_Request $request) {
-		$b = $request->get_json_params();
-		$p = self::hp($b['project'] ?? null);
-		return is_wp_error($p) ? $p : self::respond(SMS_History::undo($p, (int) ($b['n'] ?? 0), (string) ($b['change'] ?? '')));
+		return is_wp_error($p) ? $p : self::respond(SMS_History::step($p, 'forward' === ($b['direction'] ?? '') ? 'forward' : 'back', (string) (self::str($b, 'track') ?? '')));
 	}
 
 	public static function translate(WP_REST_Request $request) {

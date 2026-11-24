@@ -17,8 +17,12 @@ import { HighlightMode, focusCss, highlightCss as buildHighlightCss } from '../e
 import { applyValuesToBody, applyValuesToRoot, cleanEditorHtml, clearOverrides, readInlineEdits, syncEachBlock } from '../editor/bindings';
 import { DetectionSummary, detectProject, finalizeBodies } from '../editor/detect';
 import { MARGIN_PRESETS, MARGIN_SIDES, clampMargin } from '../utils/pageMargins';
-import { HistoryResult, HistoryVersion, StudioError, studioApi } from '../utils/studioServer';
-import { HistoryPanel, VersionInfoDialog, VersionPreview, VersionStepper, useVersionHead } from './HistoryPanel';
+import { HistoryResult, ProjectVersion, StudioError, TrackVersion, studioApi } from '../utils/studioServer';
+import {
+  AnyVersion, HistoryPanel, HistoryScope, PreviewTarget, VersionInfoDialog, VersionPreview, VersionStepper, isProjectVersion, projectPreview, projectStepHead,
+  trackChip, trackName, trackPreview, trackStepHead, useHistoryInfo, vcode,
+} from './HistoryPanel';
+import { HistoryCanvas } from './HistoryCanvas';
 import { Badge, Button, Dialog, IconButton, Input, Label, Menu, MenuItem, Segmented, Select, Spinner, cn, relativeTime, useConfirm, useToast, AppZoomControl } from '../ui/ui';
 import { EMPTY_STATE, EditorApi, ToolbarState, VisualEditor } from './VisualEditor';
 import { Toolbar } from './Toolbar';
@@ -469,13 +473,16 @@ export function ProjectScreen({ store, project, file, onNavigate, onClose }: { s
   /* ---------- Version history ---------- */
   const historyOn = store.kind === 'server';
   const [historyOpen, setHistoryOpen] = useState(false);
-  const { head, setHead } = useVersionHead(historyOn, project, p.savedTick);
-  const [previewV, setPreviewV] = useState<{ v: HistoryVersion; file?: string } | null>(null);
-  const [nameV, setNameV] = useState<HistoryVersion | null>(null);
-  const [stepping, setStepping] = useState(false);
+  const [historyScope, setHistoryScope] = useState<HistoryScope>('project');
+  const [canvasScope, setCanvasScope] = useState<HistoryScope | null>(null);
+  const { info, setInfo } = useHistoryInfo(historyOn, project, p.savedTick);
+  const [previewT, setPreviewT] = useState<PreviewTarget | null>(null);
+  const [nameV, setNameV] = useState<ProjectVersion | null>(null);
+  const [stepping, setStepping] = useState<string | null>(null);
   const ownSync = useRef(false);
+  const activeTrack = info?.tracks.find(t => t.kind === 'doc' && !t.deleted && t.file === activeFile);
 
-  /** Restore / undo / step on the server: save first, then load the result into the pages. */
+  /** Restore / step on the server: save first, then load the result into the pages. */
   const runHistory = async (label: string, fn: () => Promise<HistoryResult>): Promise<HistoryResult | null> => {
     flushEditor();
     if (mode === 'code') applyCode();
@@ -485,8 +492,11 @@ export function ProjectScreen({ store, project, file, onNavigate, onClose }: { s
       ownSync.current = true;
       await p.syncNow();
       window.setTimeout(() => { ownSync.current = false; }, 800);
-      setHead(r.head);
-      if (r.version) toast(label || `Now at v${r.head.effective_code}`, { description: `Saved as v${r.version.code}${r.changed?.length ? ' · ' + r.changed.filter(f => f !== 'project.json').map(shortDocLabel).join(', ') : ''}` });
+      setInfo({ head: r.head, tracks: r.tracks });
+      if (r.version) {
+        const moved = r.version.changes.map(m => `${trackChip(m)} v${m.to_code}`).join(', ');
+        toast(label || (r.now_at ? `Now at v${r.now_at}` : 'Done'), { description: `Project v${r.version.code}${moved ? ' · ' + moved : ''}` });
+      } else if (r.now_at) toast(`Now at v${r.now_at}`);
       else toast(r.message || 'Nothing to change', { tone: 'info' });
       return r;
     } catch (e: any) {
@@ -494,16 +504,39 @@ export function ProjectScreen({ store, project, file, onNavigate, onClose }: { s
       return null;
     }
   };
-  const stepVersion = async (dir: 'back' | 'forward') => {
-    setStepping(true);
-    try { await runHistory('', () => studioApi.historyStep(project, dir)); } finally { setStepping(false); }
+  const stepVersion = async (dir: 'back' | 'forward', track = '') => {
+    setStepping(track || 'project');
+    try { await runHistory('', () => studioApi.historyStep(project, dir, track)); } finally { setStepping(null); }
   };
-  const restoreFromPreview = async (v: HistoryVersion, file?: string) => {
-    const what = file ? shortDocLabel(file) : 'all documents';
-    if (!(await confirm({ title: `Restore ${what} to v${v.code}?`, description: 'Shared values stay as they are now. This becomes a new version, so you can go back again.', confirm: 'Restore' }))) return;
-    await runHistory(`Restored ${what} to v${v.code}`, () => studioApi.historyRestore(project, v.n, file ? [file] : undefined));
+  const restoreVersion = async (scope: HistoryScope, v: AnyVersion) => {
+    const t = scope === 'project' ? null : info?.tracks.find(x => x.track === scope);
+    const what = t ? `${trackName(t)} to v${v.code}` : `the project to v${v.code}`;
+    const description = !t ? 'Every document and the shared values go back to how they were in this version.'
+      : t.kind === 'values' ? 'The shared values go back to this version — every document follows.' : 'Only this document changes. It shows the current shared values.';
+    if (!(await confirm({ title: `Restore ${what}?`, description: `${description} This becomes a new version, so you can go forward again.`, confirm: 'Restore' }))) return;
+    await runHistory(`Restored ${what}`, () => studioApi.historyRestore(project, isProjectVersion(v) ? v.n : v.k, t ? t.track : ''));
   };
-  /** Ctrl+S: save everything and close the current version. */
+  const previewVersion = (scope: HistoryScope, v: AnyVersion, prev: number | null) => {
+    if (isProjectVersion(v)) setPreviewT(projectPreview(v, info?.tracks || [], { initial: activeTrack?.track, onRestore: () => void restoreVersion('project', v) }));
+    else {
+      const t = info?.tracks.find(x => x.track === scope);
+      if (t) setPreviewT(trackPreview(v as TrackVersion, t, prev, () => void restoreVersion(scope, v)));
+    }
+  };
+  const compareVersions = async (scope: HistoryScope, a: number, b: number) => {
+    const t = scope === 'project' ? null : info?.tracks.find(x => x.track === scope);
+    try {
+      const r = await studioApi.historyCompare(project, a, b, t ? t.track : '');
+      setPreviewT({
+        title: <span>{t ? trackName(t) : 'Project'}: v{vcode(a)} → v{vcode(b)}</span>,
+        tabs: t ? [{ track: t.track, label: trackChip(t), k: b, against: a, changed: true }]
+          : r.changes.filter(c => c.to != null).map(c => ({ track: c.track, label: trackChip({ kind: c.kind, label: c.label }), k: c.to as number, against: c.from ?? 0, changed: true })),
+        changes: r.changes,
+      });
+    } catch (e: any) { toast('Could not compare', { tone: 'error', description: e?.message }); }
+  };
+  const openHistory = (scope: HistoryScope) => { setHistoryScope(scope); setHistoryOpen(true); setDocPanel(null); };
+  /** Ctrl+S: save everything and close the current project version. */
   const quickSave = async () => {
     flushEditor();
     const ok = await p.saveAll();
@@ -511,10 +544,10 @@ export function ProjectScreen({ store, project, file, onNavigate, onClose }: { s
     if (!historyOn) { toast('All changes saved'); return; }
     try {
       const r = await studioApi.historyCommit(project);
-      setHead(r.head);
+      setInfo({ head: r.head, tracks: r.tracks });
       if (r.new_changes && r.version) {
         const v = r.version;
-        toast(`Saved as v${v.code}`, { action: { label: 'Add tag', onClick: () => setNameV(v) } });
+        toast(`Saved as v${v.code}`, { description: v.changes.map(m => `${trackChip(m)} v${m.to_code}`).join(', '), action: { label: 'Add tag', onClick: () => setNameV(v) } });
       } else toast('All changes saved');
     } catch { toast('All changes saved'); }
   };
@@ -612,7 +645,8 @@ export function ProjectScreen({ store, project, file, onNavigate, onClose }: { s
         )} />
         <div className="ml-1 hidden md:block">{statusEl}</div>
         <div className="ml-auto flex items-center gap-1">
-          {historyOn && <VersionStepper head={head} open={historyOpen} busy={stepping} onToggle={() => { setHistoryOpen(o => !o); setDocPanel(null); }} onStep={d => void stepVersion(d)} />}
+          {historyOn && <VersionStepper head={projectStepHead(info)} open={historyOpen && historyScope === 'project'} busy={stepping === 'project'}
+            onToggle={() => (historyOpen && historyScope === 'project' ? setHistoryOpen(false) : openHistory('project'))} onStep={d => void stepVersion(d)} />}
           <AppZoomControl className="mr-1" />
           <Segmented label="View" value={view === 'canvas' ? 'canvas' : 'doc'} onChange={v => v === 'canvas' ? switchTo(undefined) : switchTo(activeFile || docs[0]?.file)} options={[
             { value: 'canvas', label: <><LayoutGrid className="size-3.5" /><span className="hidden lg:inline">All pages</span></>, title: 'See all four documents together' },
@@ -750,6 +784,10 @@ export function ProjectScreen({ store, project, file, onNavigate, onClose }: { s
                   <option value="fit">Fit ({Math.round(zoom * 100)}%)</option>
                   {[0.5, 0.75, 0.9, 1, 1.25, 1.5].map(z => <option key={z} value={z}>{Math.round(z * 100)}%</option>)}
                 </select>
+                {historyOn && activeTrack && (
+                  <VersionStepper compact head={trackStepHead(activeTrack)} label={trackChip(activeTrack)} open={historyOpen && historyScope === activeTrack.track} busy={stepping === activeTrack.track}
+                    onToggle={() => (historyOpen && historyScope === activeTrack.track ? setHistoryOpen(false) : openHistory(activeTrack.track))} onStep={d => void stepVersion(d, activeTrack.track)} />
+                )}
                 <IconButton label="Page settings" active={!!docPanel} onClick={() => { setDocPanel(d => (d ? null : 'page')); setHistoryOpen(false); }}><PanelRight className="size-4" /></IconButton>
               </div>
               {mode === 'visual' && active && <Toolbar api={editor} state={tbState} disabled={busy === 'upload'} fieldMenu={fieldMenu} extra={marginsForAll} />}
@@ -796,8 +834,8 @@ export function ProjectScreen({ store, project, file, onNavigate, onClose }: { s
           )}
         </div>
         {historyOn && historyOpen && (
-          <HistoryPanel project={project} head={head} onHead={setHead} tick={p.savedTick} activeFile={view === 'doc' ? activeFile : undefined}
-            run={runHistory} onPreview={(v, f) => setPreviewV({ v, file: f || (view === 'doc' ? activeFile : undefined) })} onClose={() => setHistoryOpen(false)} />
+          <HistoryPanel project={project} info={info} onInfo={setInfo} tick={p.savedTick} scope={historyScope} onScope={setHistoryScope}
+            run={runHistory} onPreview={previewVersion} onCompare={(sc, a2, b2) => void compareVersions(sc, a2, b2)} onCanvas={sc => setCanvasScope(sc)} onClose={() => setHistoryOpen(false)} />
         )}
         {preview && docs.length > 0 && (
           <PrintPreview docs={docs.map(d => ({ file: d.file, label: shortDocLabel(d.file), model: d.model }))} activeFile={active?.file}
@@ -807,11 +845,14 @@ export function ProjectScreen({ store, project, file, onNavigate, onClose }: { s
       <div className="flex items-center border-t border-zinc-200 bg-white px-3 py-1.5 md:hidden">{statusEl}</div>
       <input ref={uploadRef} type="file" multiple accept={ACCEPTED_UPLOADS} className="hidden" onChange={e => { void onUpload(e.target.files); e.target.value = ''; }} />
 
-      <VersionPreview project={project} version={previewV?.v || null} initialFile={previewV?.file} files={docs.map(d => d.file)}
-        onClose={() => setPreviewV(null)} onRestore={(v, f) => void restoreFromPreview(v, f)} />
-      <VersionInfoDialog open={!!nameV} onClose={() => setNameV(null)} title={nameV ? `Tag v${nameV.code}` : ''} submit="Save"
-        initial={nameV ? { tag: nameV.tag, desc: nameV.desc } : undefined}
-        onSubmit={async (tag, desc) => { if (nameV) { await studioApi.historyInfo(project, nameV.n, tag, desc); toast(`Updated v${nameV.code}`); } }} />
+      {historyOn && canvasScope && (
+        <HistoryCanvas project={project} info={info} scope={canvasScope} onScope={setCanvasScope} tick={p.savedTick}
+          onPreview={setPreviewT} onRestore={(sc, v) => void restoreVersion(sc, v)} onClose={() => setCanvasScope(null)} />
+      )}
+      <VersionPreview project={project} target={previewT} onClose={() => setPreviewT(null)} />
+      <VersionInfoDialog open={!!nameV} onClose={() => setNameV(null)} title={nameV ? `Project v${nameV.code}` : ''} submit="Save"
+        initial={nameV ? { tag: nameV.tag, desc: nameV.desc, author: nameV.author } : undefined}
+        onSubmit={async ({ tag, desc, author }) => { if (nameV) { await studioApi.historyInfo(project, nameV.n, { tag, description: desc, author }); toast(`Updated v${nameV.code}`); } }} />
       <DetectDialog summary={detection} open={!!detection} onClose={() => setDetection(null)} onApply={applyDetection} />
       <RenameDialog open={!!renameDoc} onClose={() => setRenameDoc(null)} initial={(renameDoc || '').replace(/\.html$/i, '')} title="Rename document"
         onSubmit={async name => {
