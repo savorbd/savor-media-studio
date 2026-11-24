@@ -23,19 +23,29 @@ export interface StudioFile { path: string; content: string; etag: string; modif
 export interface SaveResult { path: string; etag: string; modified: number; size: number }
 export interface StudioVersion { id: string; modified: number; size: number }
 
-/* ---------- Project version history ---------- */
+/* ---------- Version history ---------- */
 export type HistorySource = 'studio' | 'mcp' | 'restore' | 'import';
-export interface HistoryFile { file: string; op: 'created' | 'deleted' | 'changed' }
-export interface HistoryVersion {
-  n: number; code: string; time: string; end: string; source: HistorySource; tag: string; desc: string; open: boolean;
-  files: HistoryFile[]; restored_from?: number; restored_from_code?: string; undo_of?: number; undo_of_code?: string; step?: boolean;
+export type ChangeOp = 'created' | 'deleted' | 'changed' | 'renamed';
+/** One track (a document, or the shared values) moving inside a project version. */
+export interface TrackMove { track: string; kind: 'doc' | 'values'; label: string; file: string; from: number | null; to: number; from_code: string | null; to_code: string; op: ChangeOp }
+interface VersionBase { code: string; time: string; end: string; source: HistorySource; author: string; tag: string; desc: string; restored_from?: number; restored_from_code?: string; step?: boolean }
+export interface ProjectVersion extends VersionBase { n: number; open: boolean; changes: TrackMove[]; heads: Record<string, number>; step_track?: string }
+export interface TrackVersion extends VersionBase { track: string; k: number; label: string; name: string; project: number; project_code: string; op: ChangeOp }
+export interface ProjectHead { n: number; code: string; effective: number; effective_code: string; can_back: boolean; can_forward: boolean; count: number; open: boolean }
+export interface TrackHead { track: string; kind: 'doc' | 'values'; label: string; file: string; deleted: boolean; k: number; code: string; effective: number; effective_code: string; can_back: boolean; can_forward: boolean; count: number }
+export interface HistoryInfo { head: ProjectHead; tracks: TrackHead[] }
+export interface HistoryHunk { id: string; kind: 'body' | 'setting' | 'value' | 'file'; label: string; before?: string; after?: string; text?: string; key?: string; op?: string }
+export interface TrackChanges { track: string; kind: 'doc' | 'values'; label: string; from: number | null; to: number | null; from_code: string | null; to_code: string | null; op: ChangeOp; hunks: HistoryHunk[] }
+export interface HistoryResult extends HistoryInfo { version: ProjectVersion | null; changed?: string[]; message?: string | null; now_at?: string }
+export interface ValueField { key: string; label: string; en: string; bn: string; changed: boolean }
+export interface RenderResult {
+  track: string; k: number; code: string; against: string | null; version: TrackVersion; changes: number; deleted?: boolean;
+  html?: string; kind?: 'values'; fields?: ValueField[]; guests?: { en: string; bn: string; host: boolean }[]; guests_changed?: boolean;
 }
-export interface HistoryHead { n: number; code: string; effective: number; effective_code: string; can_back: boolean; can_forward: boolean; count: number }
-export interface HistoryHunk {
-  id: string; kind: 'body' | 'setting' | 'value' | 'file'; label: string; before?: string; after?: string; text?: string; key?: string; op?: string; at?: number;
-}
-export interface HistoryChange { file: string; op: HistoryFile['op']; hunks: HistoryHunk[]; values_only?: boolean }
-export interface HistoryResult { version: HistoryVersion | null; head: HistoryHead; changed?: string[]; message?: string | null }
+
+const AUTHOR_KEY = 'savor-studio-author';
+export const getAuthor = () => { try { return localStorage.getItem(AUTHOR_KEY) || ''; } catch { return ''; } };
+export const setAuthor = (name: string) => { try { localStorage.setItem(AUTHOR_KEY, name.trim().slice(0, 60)); } catch { /* private mode */ } };
 
 export class StudioError extends Error {
   constructor(message: string, public status: number, public code?: string, public data?: any) { super(message); }
@@ -56,7 +66,7 @@ async function call<T>(method: string, route: string, opts: { query?: Record<str
     response = await fetch(endpoint(route, opts.query), {
       method,
       credentials: 'omit',
-      headers: { ...(opts.body !== undefined ? { 'Content-Type': 'application/json' } : {}), ...opts.headers },
+      headers: { ...(opts.body !== undefined ? { 'Content-Type': 'application/json' } : {}), ...(getAuthor() ? { 'X-Studio-Author': encodeURIComponent(getAuthor()) } : {}), ...opts.headers },
       body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined,
       signal: AbortSignal.timeout(opts.timeout ?? 30000),
     });
@@ -79,15 +89,20 @@ export const studioApi = {
   move: (from: string, to: string) => call<{ from: string; to: string }>('POST', 'move', { body: { from, to } }),
   versions: (path: string) => call<{ versions: StudioVersion[] }>('GET', 'versions', { query: { path } }).then(r => r.versions),
   version: (path: string, id: string) => call<{ content: string }>('GET', 'version', { query: { path, id } }),
-  history: (project: string, before = 0, limit = 100) =>
-    call<{ head: HistoryHead; versions: HistoryVersion[]; more: boolean }>('GET', 'history', { query: { project, limit: String(limit), ...(before ? { before: String(before) } : {}) } }),
-  historyVersion: (project: string, n: number) => call<{ version: HistoryVersion; changes: HistoryChange[]; head: HistoryHead }>('GET', 'history/version', { query: { project, n: String(n) } }),
-  historyPreview: (project: string, n: number, file: string) => call<{ html: string; changes: number; deleted?: boolean }>('GET', 'history/preview', { query: { project, n: String(n), file } }),
-  historyCommit: (project: string, tag?: string, description?: string) => call<HistoryResult & { new_changes: boolean }>('POST', 'history/commit', { body: { project, tag, description } }),
-  historyInfo: (project: string, n: number, tag: string, description: string) => call<{ version: HistoryVersion }>('POST', 'history/info', { body: { project, n, tag, description } }),
-  historyRestore: (project: string, n: number, files?: string[]) => call<HistoryResult>('POST', 'history/restore', { body: { project, n, files }, timeout: 60000 }),
-  historyStep: (project: string, direction: 'back' | 'forward') => call<HistoryResult>('POST', 'history/step', { body: { project, direction }, timeout: 60000 }),
-  historyUndo: (project: string, n: number, change: string) => call<HistoryResult>('POST', 'history/undo', { body: { project, n, change }, timeout: 60000 }),
+  history: <V = ProjectVersion>(project: string, track = '', before = 0, limit = 200) =>
+    call<HistoryInfo & { versions: V[]; more: boolean; track?: TrackHead }>('GET', 'history', { query: { project, limit: String(limit), ...(track ? { track } : {}), ...(before ? { before: String(before) } : {}) } }),
+  historyVersion: (project: string, n: number, track = '') =>
+    call<HistoryInfo & { version: ProjectVersion | TrackVersion; changes: TrackChanges[] }>('GET', 'history/version', { query: { project, n: String(n), ...(track ? { track } : {}) } }),
+  historyCompare: (project: string, a: number, b: number, track = '') =>
+    call<{ a: string; b: string; changes: TrackChanges[] }>('GET', 'history/compare', { query: { project, a: String(a), b: String(b), ...(track ? { track } : {}) } }),
+  historyRender: (project: string, track: string, k: number, against?: number | null) =>
+    call<RenderResult>('GET', 'history/render', { query: { project, track, k: String(k), ...(against != null ? { against: String(against) } : {}) } }),
+  historyCommit: (project: string, tag?: string, description?: string, author?: string) =>
+    call<HistoryResult & { new_changes: boolean }>('POST', 'history/commit', { body: { project, tag, description, author } }),
+  historyInfo: (project: string, n: number, fields: { tag?: string; description?: string; author?: string }, track = '') =>
+    call<{ version: ProjectVersion | TrackVersion }>('POST', 'history/info', { body: { project, n, track, ...fields } }),
+  historyRestore: (project: string, n: number, track = '') => call<HistoryResult>('POST', 'history/restore', { body: { project, n, track }, timeout: 60000 }),
+  historyStep: (project: string, direction: 'back' | 'forward', track = '') => call<HistoryResult>('POST', 'history/step', { body: { project, direction, track }, timeout: 60000 }),
   translate: (fields: { id: string; text: string }[], passcode?: string, mode: 'fields' | 'html' = 'fields', provider?: string) =>
     call<{ translations: { id: string; text: string }[]; provider?: string; model?: string }>('POST', 'translate', { body: { fields, mode, provider }, headers: passcode ? { 'X-Studio-Passcode': passcode } : {}, timeout: 150000 }),
 };

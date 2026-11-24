@@ -288,8 +288,7 @@ class SMS_Storage {
 			return new WP_Error('sms_write_failed', 'Could not rename.', array('status' => 500));
 		}
 		if (null !== $moved_content) {
-			SMS_History::record($from, $moved_content, null);
-			SMS_History::record($to, null, $moved_content);
+			SMS_History::renamed($from, $to, $moved_content);
 		} elseif (false === strpos($from, '/') && false === strpos($to, '/')) {
 			SMS_History::project_renamed($from, $to);
 		}

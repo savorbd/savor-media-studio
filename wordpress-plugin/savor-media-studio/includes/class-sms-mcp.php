@@ -159,6 +159,8 @@ class SMS_Mcp {
 		$project = array('type' => 'string', 'description' => 'Project name (a folder), exactly as list_projects shows it.');
 		$file    = array('type' => 'string', 'description' => 'Document file name inside the project, e.g. "Invitation (English).html".');
 		$ver     = array('type' => 'string', 'description' => 'Version code as shown in the log, e.g. "1.3".');
+		$track   = array('type' => 'string', 'description' => 'A document file name (e.g. "Invitation (English).html") or "values" for the shared values. Leave out for the whole project.');
+		$author  = array('type' => 'string', 'description' => 'Optional: who made it (shown with the version).');
 		$bi      = array('description' => 'A value in both languages: {"en": "...", "bn": "..."}. A plain string sets English only. noTranslate:true = "Don\'t translate": Bangla is kept as typed and never translated automatically.', 'oneOf' => array(array('type' => 'string'), array('type' => 'object', 'properties' => array('en' => array('type' => 'string'), 'bn' => array('type' => 'string'), 'noTranslate' => array('type' => 'boolean')))));
 		$guest   = array(
 			'type'        => 'object',
@@ -215,14 +217,14 @@ class SMS_Mcp {
 			), array('project'), $rw),
 			self::t('rename_document', 'Rename document', 'Rename a document file.', array('project' => $project, 'file' => $file, 'new_name' => array('type' => 'string')), array('project', 'file', 'new_name'), $rw),
 			self::t('delete_document', 'Delete document', 'Move a document to the trash.', array('project' => $project, 'file' => $file), array('project', 'file'), $del),
-			self::t('list_versions', 'Version history', 'The project\'s version log, newest first. One counter per project: every save that changes a document or the shared values is part of a version (saves within a minute of each other are grouped). Codes go 0.1 … 0.9, 1.0, 1.1 … Each entry shows its tag, description, source (studio, mcp, restore) and the files it changed. head.effective = the version the documents match now; can_back/can_forward say whether step_version can move.', array('project' => $project, 'limit' => array('type' => 'integer', 'description' => 'How many (default 30).'), 'before' => $ver), array('project'), $ro),
-			self::t('get_version', 'Compare a version', 'What one version changed: for each file, every change with an id (use with undo_change), what it was before and after (plain text), page settings, and shared values (one change per value or guest). values_only = the document only changed because a shared value changed.', array('project' => $project, 'version' => $ver), array('project', 'version'), $ro),
-			self::t('read_version', 'Read a document at a version', 'The plain text of a document as it was right after a version.', array('project' => $project, 'version' => $ver, 'file' => $file), array('project', 'version', 'file'), $ro),
-			self::t('save_version', 'Save version', 'Close the current version now (the next change starts a new one), optionally with a tag (short name, e.g. "Final draft") and a description. Same as Ctrl+S / Save version in the studio.', array('project' => $project, 'tag' => array('type' => 'string', 'description' => 'Up to 40 characters.'), 'description' => array('type' => 'string', 'description' => 'Up to 500 characters.')), array('project'), $rw),
-			self::t('set_version_info', 'Tag / describe a version', 'Set or clear the tag and description of any version ("" clears).', array('project' => $project, 'version' => $ver, 'tag' => array('type' => 'string'), 'description' => array('type' => 'string')), array('project', 'version'), $rw),
-			self::t('restore_version', 'Restore version', 'Bring the documents back to how they were right after a version (all documents, or only "files"). Shared values stay as they are now and are filled into the restored text. Creates a new version, so it can be undone.', array('project' => $project, 'version' => $ver, 'files' => array('type' => 'array', 'items' => array('type' => 'string'), 'description' => 'Optional: only these documents.')), array('project', 'version'), $rw),
-			self::t('step_version', 'Previous / next version', 'Move the documents one version back or forward (like the studio\'s ◀ ▶ buttons). Steps in a row share one version.', array('project' => $project, 'direction' => array('type' => 'string', 'enum' => array('back', 'forward'))), array('project', 'direction'), $rw),
-			self::t('undo_change', 'Undo one change', 'Take back one change from a version (ids from get_version), leaving everything else as it is now. Undoing a shared-value change updates every document. Creates a new version.', array('project' => $project, 'version' => $ver, 'change' => array('type' => 'string', 'description' => 'Change id from get_version, e.g. "Invitation (English).html#2" or "project.json#0".')), array('project', 'version', 'change'), $rw),
+			self::t('list_versions', 'Version history', 'Version log, newest first. Without "track": the project versions — each is a snapshot of the whole project (which version every document and the shared values were at); "changes" lists what moved, e.g. Invitation (English) 0.3→0.4. With "track" (a document file name, or "values" for the shared values): that document\'s (or the values\') own versions, each with the project version it belongs to. Codes go 0.1 … 0.9, 1.0, 1.1 … "tracks" shows every document\'s current version; head.effective = the version the project matches now (after stepping back it is older than the latest).', array('project' => $project, 'track' => $track, 'limit' => array('type' => 'integer', 'description' => 'How many (default 30).'), 'before' => $ver), array('project'), $ro),
+			self::t('get_version', 'What a version changed', 'Every change in one version, as plain text before → after: per document (paragraphs added/changed/removed, page settings, file name) and per shared value (one entry per value or guest). Project version without "track", a document\'s or the values\' own version with "track".', array('project' => $project, 'version' => $ver, 'track' => $track), array('project', 'version'), $ro),
+			self::t('compare_versions', 'Compare two versions', 'Differences going from version "a" to version "b" (any two, either order): of the whole project, or of one document / the shared values with "track".', array('project' => $project, 'a' => $ver, 'b' => $ver, 'track' => $track), array('project', 'a', 'b'), $ro),
+			self::t('read_version', 'Read a document at a version', 'The text of a document (or the shared values) as it was. "version" is a project version, unless "of": "track" — then it is the document\'s own version. Documents are shown with the shared values of that same moment.', array('project' => $project, 'track' => $track, 'version' => $ver, 'of' => array('type' => 'string', 'enum' => array('project', 'track'), 'description' => 'Which kind of version code you give (default: project).')), array('project', 'track', 'version'), $ro),
+			self::t('save_version', 'Save version', 'Close the current project version now (the next change starts a new one), with an optional tag (e.g. "Sent to press"), description and author. Same as Ctrl+S / Save version in the studio.', array('project' => $project, 'tag' => array('type' => 'string', 'description' => 'Up to 40 characters.'), 'description' => array('type' => 'string', 'description' => 'Up to 500 characters.'), 'author' => $author), array('project'), $rw),
+			self::t('set_version_info', 'Tag / describe a version', 'Set the tag, description or author of a project version, or with "track" of a document\'s or the values\' version ("" clears a field; leave a field out to keep it).', array('project' => $project, 'version' => $ver, 'track' => $track, 'tag' => array('type' => 'string'), 'description' => array('type' => 'string'), 'author' => $author), array('project', 'version'), $rw),
+			self::t('restore_version', 'Restore a version', 'Without "track": bring the whole project back to a project version — every document and the shared values (documents that did not exist then are moved to the trash). With "track": bring back only that document\'s version (shown with today\'s shared values), or with track "values" the shared values (every document follows). Makes a new version, so it can be undone by restoring again.', array('project' => $project, 'version' => $ver, 'track' => $track), array('project', 'version'), $rw),
+			self::t('step_version', 'Previous / next version', 'Move one version back or forward — the whole project, or one document / the shared values with "track" (the studio\'s ◀ ▶). Steps in a row share one version; stepping back to where you started removes it.', array('project' => $project, 'direction' => array('type' => 'string', 'enum' => array('back', 'forward')), 'track' => $track), array('project', 'direction'), $rw),
 			self::t('get_shared_values', 'Get shared values', 'The project\'s shared values (raw, as stored) and how each one reads in English and Bangla, with the special guests in printed order.', array('project' => $project), array('project'), $ro),
 			self::t('set_shared_values', 'Set shared values', 'Change shared values; every document updates at once. Only the keys you give change. Keys: ' . implode(', ', $keys) . '. Text values take {"en","bn"}; dates "YYYY-MM-DD"; eventTime "HH:MM" (24h); edition/year numbers; chiefGuest a guest or null; specialGuests the full ordered list (order = printed order). When English changes without Bangla, Bangla is translated with the site\'s AI (translate:"none" to skip).', array(
 				'project'   => $project,
@@ -315,7 +317,7 @@ class SMS_Mcp {
 			. "• The canvas and print use the same A4 layout: a paragraph that doesn't fit at the bottom of a page moves whole to the next page.\n"
 			. "• Bangla: give both en and bn when you know the correct Bangla; otherwise the site's AI translates (formal Bangladesh style).\n"
 			. "• Check your work with read_document or get_project. Share results with export_document (Word, print/PDF, HTML) or open_in_studio.\n"
-			. "• Version history: every change is part of a numbered project version (0.1, 0.2 … 1.0 …). list_versions shows the log, get_version what a version changed (with change ids), undo_change takes back one change, restore_version / step_version bring documents back (shared values stay current), save_version closes the current version with an optional tag and description, set_version_info renames any version.";
+			. "• Version history: each document and the shared values have their own versions (Invitation (English) v0.4, values v0.2); every change also makes a project version (a snapshot of the whole project). Codes: 0.1 … 0.9, 1.0 … list_versions (project, or track = a file name or \"values\"), get_version, compare_versions, read_version, restore_version (whole project, or one track), step_version (◀ ▶), save_version (close the current version with tag/description/author), set_version_info.";
 		if ($short) {
 			return $text;
 		}
@@ -669,11 +671,10 @@ class SMS_Mcp {
 		return is_wp_error($r) ? $r : array('deleted' => $d['file']);
 	}
 
-	private static function version_n($a) {
-		$v = trim((string) self::arg($a, 'version', ''));
-		$v = ltrim($v, 'vV');
+	private static function version_n($a, $key = 'version') {
+		$v = ltrim(trim((string) self::arg($a, $key, '')), 'vV');
 		if ('' === $v || !is_numeric($v)) {
-			return new WP_Error('sms_bad_version', 'Give the version code as shown in list_versions, e.g. "1.3".');
+			return new WP_Error('sms_bad_version', 'Give "' . $key . '" as a version code from list_versions, e.g. "1.3".');
 		}
 		return (int) round(((float) $v) * 10);
 	}
@@ -682,82 +683,89 @@ class SMS_Mcp {
 		return SMS_Project::require_project(self::arg($a, 'project'));
 	}
 
-	private static function tool_list_versions($a) {
-		$p = self::hproject($a);
-		if (is_wp_error($p)) {
-			return $p;
+	private static function hfirst(...$xs) {
+		foreach ($xs as $x) {
+			if (is_wp_error($x)) {
+				return $x;
+			}
 		}
-		$before = null !== self::arg($a, 'before') ? self::version_n($a + array('version' => self::arg($a, 'before'))) : 0;
-		$r = SMS_History::listing($p, (int) (self::arg($a, 'limit') ?: 30), is_wp_error($before) ? 0 : $before);
+		return null;
+	}
+
+	private static function opt_str($a, $k) {
+		$v = self::arg($a, $k);
+		return null === $v ? null : (string) $v;
+	}
+
+	private static function tool_list_versions($a) {
+		$p      = self::hproject($a);
+		$before = null !== self::arg($a, 'before') ? self::version_n($a, 'before') : 0;
+		if ($e = self::hfirst($p, $before)) {
+			return $e;
+		}
+		$r = SMS_History::listing($p, (string) self::arg($a, 'track', ''), (int) (self::arg($a, 'limit') ?: 30), $before);
+		if (is_wp_error($r)) {
+			return $r;
+		}
 		$r['versions'] = array_map(function ($v) {
-			unset($v['n'], $v['end']);
-			$v['files'] = array_map(function ($f) { return 'changed' === $f['op'] ? $f['file'] : $f['file'] . ' (' . $f['op'] . ')'; }, $v['files']);
-			return array_filter($v, function ($x) { return '' !== $x && false !== $x && array() !== $x; });
+			unset($v['n'], $v['k'], $v['end'], $v['heads'], $v['track'], $v['project'], $v['step_track']);
+			if (isset($v['changes'])) {
+				$v['changes'] = array_map(function ($c) {
+					return $c['label'] . ' ' . (null === $c['from_code'] ? '' : $c['from_code'] . '→') . $c['to_code'] . ('changed' === $c['op'] ? '' : ' (' . $c['op'] . ')');
+				}, $v['changes']);
+			}
+			return array_filter($v, function ($x) { return '' !== $x && false !== $x && array() !== $x && null !== $x; });
 		}, $r['versions']);
+		$r['tracks'] = array_map(function ($t) {
+			return $t['label'] . ' v' . $t['code'] . ($t['effective'] !== $t['k'] ? ' (now matches v' . $t['effective_code'] . ')' : '') . ($t['deleted'] ? ' (deleted)' : '');
+		}, $r['tracks']);
+		unset($r['track']['effective'], $r['head']['n'], $r['head']['effective']);
 		return $r;
 	}
 
 	private static function tool_get_version($a) {
 		$p = self::hproject($a);
 		$n = self::version_n($a);
-		if (is_wp_error($p) || is_wp_error($n)) {
-			return is_wp_error($p) ? $p : $n;
-		}
-		return SMS_History::version_detail($p, $n);
+		return ($e = self::hfirst($p, $n)) ? $e : SMS_History::detail($p, $n, (string) self::arg($a, 'track', ''));
+	}
+
+	private static function tool_compare_versions($a) {
+		$p  = self::hproject($a);
+		$va = self::version_n($a, 'a');
+		$vb = self::version_n($a, 'b');
+		return ($e = self::hfirst($p, $va, $vb)) ? $e : SMS_History::compare($p, $va, $vb, (string) self::arg($a, 'track', ''));
 	}
 
 	private static function tool_read_version($a) {
 		$p = self::hproject($a);
 		$n = self::version_n($a);
-		if (is_wp_error($p) || is_wp_error($n)) {
-			return is_wp_error($p) ? $p : $n;
-		}
-		$r = SMS_History::preview($p, $n, basename((string) self::arg($a, 'file')));
-		if (is_wp_error($r)) {
-			return $r;
-		}
-		$m = SMS_Doc::parse(preg_replace('#<div data-sv-diff="del">.*?</div>#s', '', $r['html']), 'x');
-		return array('file' => $r['file'], 'version' => $r['code'], 'text' => SMS_Doc::text($m['body']));
+		return ($e = self::hfirst($p, $n)) ? $e : SMS_History::read($p, $n, (string) self::arg($a, 'track', ''), 'track' !== self::arg($a, 'of'));
 	}
 
 	private static function tool_save_version($a) {
 		$p = self::hproject($a);
-		return is_wp_error($p) ? $p : SMS_History::commit($p, self::arg($a, 'tag'), self::arg($a, 'description'));
+		return is_wp_error($p) ? $p : SMS_History::commit($p, self::opt_str($a, 'tag'), self::opt_str($a, 'description'), self::opt_str($a, 'author'));
 	}
 
 	private static function tool_set_version_info($a) {
 		$p = self::hproject($a);
 		$n = self::version_n($a);
-		if (is_wp_error($p) || is_wp_error($n)) {
-			return is_wp_error($p) ? $p : $n;
-		}
-		$tag  = self::arg($a, 'tag');
-		$desc = self::arg($a, 'description');
-		return SMS_History::set_info($p, $n, null === $tag ? null : (string) $tag, null === $desc ? null : (string) $desc);
+		return ($e = self::hfirst($p, $n)) ? $e : SMS_History::set_info($p, $n, (string) self::arg($a, 'track', ''), self::opt_str($a, 'tag'), self::opt_str($a, 'description'), self::opt_str($a, 'author'));
 	}
 
 	private static function tool_restore_version($a) {
 		$p = self::hproject($a);
 		$n = self::version_n($a);
-		if (is_wp_error($p) || is_wp_error($n)) {
-			return is_wp_error($p) ? $p : $n;
+		if ($e = self::hfirst($p, $n)) {
+			return $e;
 		}
-		$files = array_values(array_filter(array_map('basename', array_map('strval', (array) self::arg($a, 'files', array())))));
-		return SMS_History::restore($p, $n, $files);
+		$t = (string) self::arg($a, 'track', '');
+		return '' === $t ? SMS_History::restore($p, $n) : SMS_History::restore_track($p, $t, $n);
 	}
 
 	private static function tool_step_version($a) {
 		$p = self::hproject($a);
-		return is_wp_error($p) ? $p : SMS_History::step($p, 'forward' === self::arg($a, 'direction') ? 'forward' : 'back');
-	}
-
-	private static function tool_undo_change($a) {
-		$p = self::hproject($a);
-		$n = self::version_n($a);
-		if (is_wp_error($p) || is_wp_error($n)) {
-			return is_wp_error($p) ? $p : $n;
-		}
-		return SMS_History::undo($p, $n, (string) self::arg($a, 'change'));
+		return is_wp_error($p) ? $p : SMS_History::step($p, 'forward' === self::arg($a, 'direction') ? 'forward' : 'back', (string) self::arg($a, 'track', ''));
 	}
 
 	/* ---------- Shared values ---------- */
