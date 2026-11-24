@@ -69,24 +69,24 @@ export const projectStepHead = (i: HistoryInfo | null): StepHead | null => (i ? 
 export const trackStepHead = (t: TrackHead | undefined): StepHead | null => (t ? { ...t, latest: t.k } : null);
 
 /** ◀ v1.3 ▶ — for the project, or (compact) for one document. */
-export function VersionStepper({ head, label, open, busy, onToggle, onStep, compact }: {
-  head: StepHead | null; label?: string; open: boolean; busy: boolean; onToggle: () => void; onStep: (dir: 'back' | 'forward') => void; compact?: boolean;
+export function VersionStepper({ head, label, open, busy, onToggle, onStep, compact, arrows = true }: {
+  head: StepHead | null; label?: string; open: boolean; busy: boolean; onToggle: () => void; onStep: (dir: 'back' | 'forward') => void; compact?: boolean; arrows?: boolean;
 }) {
   const arrow = cn('grid place-items-center rounded-md text-zinc-600 hover:bg-white hover:shadow-soft disabled:opacity-35 disabled:hover:bg-transparent disabled:hover:shadow-none', compact ? 'size-5' : 'size-6');
   const who = label || 'Project';
   return (
     <div className={cn('flex shrink-0 items-center rounded-lg bg-zinc-100 p-0.5', compact ? 'h-6' : 'h-7')} role="group" aria-label={`${who} versions`}>
-      <button aria-label={`${who}: previous version`} title={head?.can_back ? `${who}: go back one version` : 'No earlier version'} disabled={!head?.can_back || busy}
-        onClick={() => onStep('back')} className={arrow}><ChevronLeft className={compact ? 'size-3.5' : 'size-4'} /></button>
+      {arrows && <button aria-label={`${who}: previous version`} title={head?.can_back ? `${who}: go back one version` : 'No earlier version'} disabled={!head?.can_back || busy}
+        onClick={() => onStep('back')} className={arrow}><ChevronLeft className={compact ? 'size-3.5' : 'size-4'} /></button>}
       <button onClick={onToggle} aria-pressed={open} title={`${who} version history`}
         className={cn('flex items-center gap-1 rounded-md font-semibold tabular-nums transition-colors', compact ? 'h-5 px-1 text-[11.5px]' : 'h-6 px-1.5 text-[12.5px]', open ? 'bg-white text-indigo-700 shadow-soft' : 'text-zinc-700 hover:bg-white hover:shadow-soft')}>
-        {busy ? <Loader2 className="size-3.5 animate-spin" /> : compact ? <FileText className="size-3" /> : <History className="size-3.5" />}
+        {busy ? <Loader2 className="size-3.5 animate-spin" /> : label ? <FileText className={compact ? 'size-3' : 'size-3.5'} /> : <History className="size-3.5" />}
         {label && <span className="font-medium text-zinc-500">{label}</span>}
         {head?.effective ? `v${head.effective_code}` : label ? '—' : 'History'}
         {head && head.effective !== head.latest && <span className="size-1.5 rounded-full bg-amber-500" title={`Showing an earlier version (latest v${vcode(head.latest)})`} />}
       </button>
-      <button aria-label={`${who}: next version`} title={head?.can_forward ? `${who}: go forward one version` : 'No later version'} disabled={!head?.can_forward || busy}
-        onClick={() => onStep('forward')} className={arrow}><ChevronRight className={compact ? 'size-3.5' : 'size-4'} /></button>
+      {arrows && <button aria-label={`${who}: next version`} title={head?.can_forward ? `${who}: go forward one version` : 'No later version'} disabled={!head?.can_forward || busy}
+        onClick={() => onStep('forward')} className={arrow}><ChevronRight className={compact ? 'size-3.5' : 'size-4'} /></button>}
     </div>
   );
 }
