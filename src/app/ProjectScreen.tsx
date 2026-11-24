@@ -647,7 +647,18 @@ export function ProjectScreen({ store, project, file, onNavigate, onClose }: { s
         )} />
         <div className="ml-1 hidden md:block">{statusEl}</div>
         <div className="ml-auto flex items-center gap-1">
-          {historyOn && <VersionStepper head={projectStepHead(info)} open={historyOpen && historyScope === 'project'} busy={stepping === 'project'}
+          {view === 'doc' && (
+            <select aria-label="Zoom" value={String(zoomPref)} onChange={e => setZoomPref(e.target.value === 'fit' ? 'fit' : Number(e.target.value))}
+              className="hidden h-7 rounded-md border-0 bg-transparent px-1.5 text-[12px] text-zinc-600 hover:bg-zinc-100 focus:outline-none md:block">
+              <option value="fit">Fit ({Math.round(zoom * 100)}%)</option>
+              {[0.5, 0.75, 0.9, 1, 1.25, 1.5].map(z => <option key={z} value={z}>{Math.round(z * 100)}%</option>)}
+            </select>
+          )}
+          {historyOn && view === 'doc' && activeTrack && (
+            <VersionStepper arrows={false} head={trackStepHead(activeTrack)} label={trackChip(activeTrack)} open={historyOpen && historyScope === activeTrack.track} busy={stepping === activeTrack.track}
+              onToggle={() => (historyOpen && historyScope === activeTrack.track ? setHistoryOpen(false) : openHistory(activeTrack.track))} onStep={d => void stepVersion(d, activeTrack.track)} />
+          )}
+          {historyOn && <VersionStepper arrows={false} head={projectStepHead(info)} open={historyOpen && historyScope === 'project'} busy={stepping === 'project'}
             onToggle={() => (historyOpen && historyScope === 'project' ? setHistoryOpen(false) : openHistory('project'))} onStep={d => void stepVersion(d)} />}
           <AppZoomControl className="mr-1" />
           <Segmented label="View" value={view === 'canvas' ? 'canvas' : 'doc'} onChange={v => v === 'canvas' ? switchTo(undefined) : switchTo(activeFile || docs[0]?.file)} options={[
@@ -781,15 +792,6 @@ export function ProjectScreen({ store, project, file, onNavigate, onClose }: { s
                     { label: 'Upload Word / HTML…', icon: <Upload />, onSelect: () => { uploadMode.current = { kind: 'add' }; uploadRef.current?.click(); } },
                   ]} trigger={t => <IconButton label="Add document" {...t} className="ml-1 shrink-0"><Plus className="size-4" /></IconButton>} />
                 </nav>
-                <select aria-label="Zoom" value={String(zoomPref)} onChange={e => setZoomPref(e.target.value === 'fit' ? 'fit' : Number(e.target.value))}
-                  className="hidden h-6 rounded-md border-0 bg-transparent px-1.5 text-[12px] text-zinc-600 hover:bg-zinc-200/60 focus:outline-none md:block">
-                  <option value="fit">Fit ({Math.round(zoom * 100)}%)</option>
-                  {[0.5, 0.75, 0.9, 1, 1.25, 1.5].map(z => <option key={z} value={z}>{Math.round(z * 100)}%</option>)}
-                </select>
-                {historyOn && activeTrack && (
-                  <VersionStepper compact head={trackStepHead(activeTrack)} label={trackChip(activeTrack)} open={historyOpen && historyScope === activeTrack.track} busy={stepping === activeTrack.track}
-                    onToggle={() => (historyOpen && historyScope === activeTrack.track ? setHistoryOpen(false) : openHistory(activeTrack.track))} onStep={d => void stepVersion(d, activeTrack.track)} />
-                )}
                 <IconButton label="Page settings" active={!!docPanel} onClick={() => { setDocPanel(d => (d ? null : 'page')); setHistoryOpen(false); }}><PanelRight className="size-4" /></IconButton>
               </div>
               {mode === 'visual' && active && <Toolbar api={editor} state={tbState} disabled={busy === 'upload'} fieldMenu={fieldMenu} extra={marginsForAll} />}
