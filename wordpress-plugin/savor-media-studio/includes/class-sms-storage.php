@@ -35,6 +35,10 @@ class SMS_Storage {
 		$this->root = rtrim($root, '/\\');
 	}
 
+	public function root_dir() {
+		return $this->root;
+	}
+
 	public function files_dir() {
 		return $this->root . '/files';
 	}
@@ -213,15 +217,14 @@ class SMS_Storage {
 		if (!is_dir($dir)) {
 			return new WP_Error('sms_no_folder', 'Folder not found.', array('status' => 404));
 		}
-		if ($exists) {
-			$this->maybe_snapshot($rel, $file);
-		}
+		$old = $exists ? (string) file_get_contents($file) : null;
 		$tmp = $file . '.tmp-' . wp_generate_password(8, false);
 		if (false === file_put_contents($tmp, $json, LOCK_EX) || !@rename($tmp, $file)) {
 			@unlink($tmp);
 			return new WP_Error('sms_write_failed', 'The server could not save this file.', array('status' => 500));
 		}
 		clearstatcache(true, $file);
+		SMS_History::record($rel, $old, $json);
 		return array('path' => $rel, 'etag' => md5($json), 'modified' => filemtime($file), 'size' => strlen($json));
 	}
 
@@ -280,8 +283,15 @@ class SMS_Storage {
 				}
 			}
 		}
+		$moved_content = is_file($a) ? (string) file_get_contents($a) : null;
 		if (!@rename($a, $b)) {
 			return new WP_Error('sms_write_failed', 'Could not rename.', array('status' => 500));
+		}
+		if (null !== $moved_content) {
+			SMS_History::record($from, $moved_content, null);
+			SMS_History::record($to, null, $moved_content);
+		} elseif (false === strpos($from, '/') && false === strpos($to, '/')) {
+			SMS_History::project_renamed($from, $to);
 		}
 		foreach ($moved_versions as $pair) {
 			$va = $this->version_dir_for($pair[0]);
@@ -300,9 +310,15 @@ class SMS_Storage {
 			return new WP_Error('sms_not_found', 'File not found.', array('status' => 404));
 		}
 		$this->purge_trash();
+		$was  = is_file($src) ? (string) file_get_contents($src) : null;
 		$dest = $this->trash_dir() . '/' . gmdate('Ymd-His') . '__' . str_replace('/', '__', $rel);
 		if (!@rename($src, $dest)) {
 			return new WP_Error('sms_write_failed', 'Could not delete.', array('status' => 500));
+		}
+		if (null !== $was) {
+			SMS_History::record($rel, $was, null);
+		} elseif (false === strpos($rel, '/')) {
+			SMS_History::project_trashed($rel);
 		}
 		return array('path' => $rel, 'trashed' => true);
 	}

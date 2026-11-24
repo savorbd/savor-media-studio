@@ -29,6 +29,7 @@ require_once SMS_DIR . 'includes/class-sms-doc.php';
 require_once SMS_DIR . 'includes/class-sms-values.php';
 require_once SMS_DIR . 'includes/class-sms-import.php';
 require_once SMS_DIR . 'includes/class-sms-project.php';
+require_once SMS_DIR . 'includes/class-sms-history.php';
 require_once SMS_DIR . 'includes/class-sms-mcp.php';
 require_once SMS_DIR . 'includes/class-sms-frontend.php';
 require_once SMS_DIR . 'includes/class-sms-admin.php';

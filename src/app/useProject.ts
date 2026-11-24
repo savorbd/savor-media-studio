@@ -40,6 +40,9 @@ export function useProject(store: Store, project: string) {
   /** Server modification time of each file as we last saw or saved it (for live sync). */
   const known = useRef<Record<string, number>>({});
   const [remote, setRemote] = useState<{ n: number; files: string[] }>({ n: 0, files: [] });
+  /** Bumps after every successful save or remote change (the version history refreshes on it). */
+  const [savedTick, setSavedTick] = useState(0);
+  const syncRef = useRef<(force?: boolean) => Promise<void>>(async () => {});
 
   /* ---------- Load ---------- */
   const load = useCallback(async () => {
@@ -88,6 +91,7 @@ export function useProject(store: Store, project: string) {
       const r = await store.save(pathOf(f), serializeDoc({ ...model, body: cleanEditorHtml(model.body) }), overwrite ? null : d.etag);
       known.current[f] = r.modified;
       patch(f, x => ({ ...x, etag: r.etag, savedAt: Date.now(), status: x.dirty ? 'pending' : 'saved', error: undefined }));
+      setSavedTick(t => t + 1);
       return true;
     } catch (e: any) {
       const conflict = e instanceof StudioError && e.status === 409 && e.code === 'sms_conflict';
@@ -116,6 +120,7 @@ export function useProject(store: Store, project: string) {
       known.current[VALUES_FILE] = r.modified;
       setHasValuesFile(true);
       setValuesStatus(valuesDirty.current ? 'pending' : 'saved');
+      setSavedTick(t => t + 1);
       return true;
     } catch (e: any) {
       valuesDirty.current = true;
@@ -252,8 +257,9 @@ export function useProject(store: Store, project: string) {
   useEffect(() => {
     if (store.kind !== 'server') return;
     let busy = false;
-    const tick = async () => {
-      if (busy || document.visibilityState !== 'visible' || !docsRef.current.length && !known.current[VALUES_FILE]) return;
+    const tick = async (force = false): Promise<void> => {
+      if (busy && force) { await new Promise(r => setTimeout(r, 250)); return tick(true); }
+      if (busy || (!force && document.visibilityState !== 'visible') || !docsRef.current.length && !known.current[VALUES_FILE]) return;
       busy = true;
       const updated: string[] = [];
       try {
@@ -262,7 +268,7 @@ export function useProject(store: Store, project: string) {
         for (const it of inProject) {
           const f = it.path.slice(project.length + 1);
           const was = known.current[f];
-          if (was !== undefined && it.modified <= was) continue;
+          if (!force && was !== undefined && it.modified <= was) continue;
           if (f === VALUES_FILE) {
             if (valuesDirty.current) continue;
             const r = await store.read(it.path);
@@ -297,8 +303,9 @@ export function useProject(store: Store, project: string) {
           updated.push(...gone);
         }
       } catch { /* offline for a moment: try again next time */ } finally { busy = false; }
-      if (updated.length) setRemote(r => ({ n: r.n + 1, files: updated }));
+      if (updated.length) { setRemote(r => ({ n: r.n + 1, files: updated })); setSavedTick(t => t + 1); }
     };
+    syncRef.current = tick;
     const id = window.setInterval(() => void tick(), 4000);
     return () => window.clearInterval(id);
   }, [project, store]);
@@ -314,7 +321,7 @@ export function useProject(store: Store, project: string) {
   return {
     docs, setDocs, docsRef, values, valuesRef, setValues, replaceAll, reapply, hasValuesFile, loadError, load,
     updateModel, patch, save, saveAll, saveValues, status, lastSaved, usage, live, changedKeys,
-    remote, undo, redo, canUndo: history.current.past.length > 0, canRedo: history.current.future.length > 0, historyTick, pathOf,
+    remote, savedTick, syncNow: (force = true) => syncRef.current(force), undo, redo, canUndo: history.current.past.length > 0, canRedo: history.current.future.length > 0, historyTick, pathOf,
   };
 }
 

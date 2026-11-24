@@ -17,7 +17,8 @@ import { HighlightMode, focusCss, highlightCss as buildHighlightCss } from '../e
 import { applyValuesToBody, applyValuesToRoot, cleanEditorHtml, clearOverrides, readInlineEdits, syncEachBlock } from '../editor/bindings';
 import { DetectionSummary, detectProject, finalizeBodies } from '../editor/detect';
 import { MARGIN_PRESETS, MARGIN_SIDES, clampMargin } from '../utils/pageMargins';
-import { StudioError, StudioVersion } from '../utils/studioServer';
+import { HistoryResult, HistoryVersion, StudioError, studioApi } from '../utils/studioServer';
+import { HistoryPanel, VersionInfoDialog, VersionPreview, VersionStepper, useVersionHead } from './HistoryPanel';
 import { Badge, Button, Dialog, IconButton, Input, Label, Menu, MenuItem, Segmented, Select, Spinner, cn, relativeTime, useConfirm, useToast, AppZoomControl } from '../ui/ui';
 import { EMPTY_STATE, EditorApi, ToolbarState, VisualEditor } from './VisualEditor';
 import { Toolbar } from './Toolbar';
@@ -150,7 +151,7 @@ export function ProjectScreen({ store, project, file, onNavigate, onClose }: { s
 
   // Changes made elsewhere (e.g. by the AI connector) were loaded: say so.
   useEffect(() => {
-    if (!p.remote.n) return;
+    if (!p.remote.n || ownSync.current) return;
     toast('Updated from elsewhere', { description: p.remote.files.map(f => (f.endsWith('.html') ? shortDocLabel(f) : f)).join(', ') });
   }, [p.remote.n]);
 
@@ -465,18 +466,57 @@ export function ProjectScreen({ store, project, file, onNavigate, onClose }: { s
     } catch (e: any) { toast('Could not delete', { tone: 'error', description: e?.message }); }
   };
 
-  /* ---------- Versions ---------- */
-  const [versions, setVersions] = useState<StudioVersion[] | null>(null);
-  useEffect(() => {
-    if (docPanel !== 'history' || !activeFile) return;
-    setVersions(null);
-    store.versions(p.pathOf(activeFile)).then(setVersions).catch(() => setVersions([]));
-  }, [docPanel, activeFile]);
-  const restoreVersion = async (id: string) => {
-    if (!activeFile || !active) return;
-    if (!(await confirm({ title: 'Restore this version?', description: 'The current content is kept as a version too, so you can switch back.', confirm: 'Restore' }))) return;
-    try { replaceModel(activeFile, parseDoc(await store.version(p.pathOf(activeFile), id), active.model.title)); toast('Version restored'); }
-    catch (e: any) { toast('Could not restore', { tone: 'error', description: e?.message }); }
+  /* ---------- Version history ---------- */
+  const historyOn = store.kind === 'server';
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const { head, setHead } = useVersionHead(historyOn, project, p.savedTick);
+  const [previewV, setPreviewV] = useState<{ v: HistoryVersion; file?: string } | null>(null);
+  const [nameV, setNameV] = useState<HistoryVersion | null>(null);
+  const [stepping, setStepping] = useState(false);
+  const ownSync = useRef(false);
+
+  /** Restore / undo / step on the server: save first, then load the result into the pages. */
+  const runHistory = async (label: string, fn: () => Promise<HistoryResult>): Promise<HistoryResult | null> => {
+    flushEditor();
+    if (mode === 'code') applyCode();
+    if (!(await p.saveAll())) { toast('Could not save your latest changes first', { tone: 'error', description: 'Try again in a moment.' }); return null; }
+    try {
+      const r = await fn();
+      ownSync.current = true;
+      await p.syncNow();
+      window.setTimeout(() => { ownSync.current = false; }, 800);
+      setHead(r.head);
+      if (r.version) toast(label || `Now at v${r.head.effective_code}`, { description: `Saved as v${r.version.code}${r.changed?.length ? ' · ' + r.changed.filter(f => f !== 'project.json').map(shortDocLabel).join(', ') : ''}` });
+      else toast(r.message || 'Nothing to change', { tone: 'info' });
+      return r;
+    } catch (e: any) {
+      toast('Could not do that', { tone: 'error', description: e?.message });
+      return null;
+    }
+  };
+  const stepVersion = async (dir: 'back' | 'forward') => {
+    setStepping(true);
+    try { await runHistory('', () => studioApi.historyStep(project, dir)); } finally { setStepping(false); }
+  };
+  const restoreFromPreview = async (v: HistoryVersion, file?: string) => {
+    const what = file ? shortDocLabel(file) : 'all documents';
+    if (!(await confirm({ title: `Restore ${what} to v${v.code}?`, description: 'Shared values stay as they are now. This becomes a new version, so you can go back again.', confirm: 'Restore' }))) return;
+    await runHistory(`Restored ${what} to v${v.code}`, () => studioApi.historyRestore(project, v.n, file ? [file] : undefined));
+  };
+  /** Ctrl+S: save everything and close the current version. */
+  const quickSave = async () => {
+    flushEditor();
+    const ok = await p.saveAll();
+    if (!ok) return;
+    if (!historyOn) { toast('All changes saved'); return; }
+    try {
+      const r = await studioApi.historyCommit(project);
+      setHead(r.head);
+      if (r.new_changes && r.version) {
+        const v = r.version;
+        toast(`Saved as v${v.code}`, { action: { label: 'Add tag', onClick: () => setNameV(v) } });
+      } else toast('All changes saved');
+    } catch { toast('All changes saved'); }
   };
 
   /* ---------- Export ---------- */
@@ -524,7 +564,7 @@ export function ProjectScreen({ store, project, file, onNavigate, onClose }: { s
   /* ---------- Keyboard ---------- */
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') { e.preventDefault(); void p.saveAll().then(ok => ok && toast('All changes saved')); }
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') { e.preventDefault(); void quickSave(); }
       if (e.key === 'Escape' && selectedKey && !document.querySelector('[role=dialog]')) setSelectedKey(null);
     };
     window.addEventListener('keydown', onKey);
@@ -572,6 +612,7 @@ export function ProjectScreen({ store, project, file, onNavigate, onClose }: { s
         )} />
         <div className="ml-1 hidden md:block">{statusEl}</div>
         <div className="ml-auto flex items-center gap-1">
+          {historyOn && <VersionStepper head={head} open={historyOpen} busy={stepping} onToggle={() => { setHistoryOpen(o => !o); setDocPanel(null); }} onStep={d => void stepVersion(d)} />}
           <AppZoomControl className="mr-1" />
           <Segmented label="View" value={view === 'canvas' ? 'canvas' : 'doc'} onChange={v => v === 'canvas' ? switchTo(undefined) : switchTo(activeFile || docs[0]?.file)} options={[
             { value: 'canvas', label: <><LayoutGrid className="size-3.5" /><span className="hidden lg:inline">All pages</span></>, title: 'See all four documents together' },
@@ -657,7 +698,7 @@ export function ProjectScreen({ store, project, file, onNavigate, onClose }: { s
                         onActivate={() => activate(d.file)}
                         onBlurDoc={() => p.reapply(d.file)}
                         onWheel={(e, frame) => canvasApi.current?.forwardWheel(e, frame)}
-                        onChange={body => onEditorChange(d.file, body)} onState={st => { if (d.file === (focusFile || docs[0]?.file)) setTbState(st); }} onSave={() => void p.saveAll()} />
+                        onChange={body => onEditorChange(d.file, body)} onState={st => { if (d.file === (focusFile || docs[0]?.file)) setTbState(st); }} onSave={() => void quickSave()} />
                     ),
                   }))} />
                 </div>
@@ -709,7 +750,7 @@ export function ProjectScreen({ store, project, file, onNavigate, onClose }: { s
                   <option value="fit">Fit ({Math.round(zoom * 100)}%)</option>
                   {[0.5, 0.75, 0.9, 1, 1.25, 1.5].map(z => <option key={z} value={z}>{Math.round(z * 100)}%</option>)}
                 </select>
-                <IconButton label="Page settings and history" active={!!docPanel} onClick={() => setDocPanel(d => (d ? null : 'page'))}><PanelRight className="size-4" /></IconButton>
+                <IconButton label="Page settings" active={!!docPanel} onClick={() => { setDocPanel(d => (d ? null : 'page')); setHistoryOpen(false); }}><PanelRight className="size-4" /></IconButton>
               </div>
               {mode === 'visual' && active && <Toolbar api={editor} state={tbState} disabled={busy === 'upload'} fieldMenu={fieldMenu} extra={marginsForAll} />}
               <div className="flex min-h-0 flex-1">
@@ -722,7 +763,7 @@ export function ProjectScreen({ store, project, file, onNavigate, onClose }: { s
                         extraCss={highlightCss} onHoverField={setHoverKey} onBlurDoc={() => p.reapply(active.file)}
                         onLoaded={root => applyValuesToRoot(root, active.model.lang, p.valuesRef.current, { lockStructured: true })}
                         onFieldClick={(k, ov) => onFieldClick(k, ov, active.file)}
-                        onChange={body => onEditorChange(active.file, body)} onState={setTbState} onSave={() => void p.saveAll()} />
+                        onChange={body => onEditorChange(active.file, body)} onState={setTbState} onSave={() => void quickSave()} />
                       <p className="mx-auto mt-3 w-fit text-[11px] text-zinc-400">Coloured text is linked to Shared fields · Grey lines mark approximate A4 page breaks · Ctrl+S saves now</p>
                     </div>
                   ) : (
@@ -742,31 +783,11 @@ export function ProjectScreen({ store, project, file, onNavigate, onClose }: { s
                 {docPanel && active && (
                   <aside className="sv-scroll flex w-[320px] shrink-0 flex-col overflow-y-auto border-l border-zinc-200 bg-zinc-50 max-xl:absolute max-xl:bottom-0 max-xl:right-0 max-xl:top-[100px] max-xl:z-30 max-xl:shadow-pop">
                     <div className="sticky top-0 z-10 flex items-center gap-1 border-b border-zinc-200 bg-zinc-50/95 px-3 py-2 backdrop-blur">
-                      <Segmented label="Document panel" value={docPanel} onChange={setDocPanel} options={[{ value: 'page', label: 'Page' }, { value: 'history', label: 'History' }]} />
+                      <h2 className="text-[13px] font-semibold text-zinc-900">Page settings</h2>
                       <IconButton label="Close panel" className="ml-auto" onClick={() => setDocPanel(null)}><X className="size-4" /></IconButton>
                     </div>
                     <div className="p-4">
-                      {docPanel === 'page' ? <PagePanel model={active.model} onChange={fn => p.updateModel(active.file, fn)} /> : (
-                        <div className="space-y-3">
-                          <p className="text-[13px] text-zinc-500">Earlier versions of <strong>{shortDocLabel(active.file)}</strong>, kept every 5 minutes while you work (last 30).</p>
-                          {store.kind !== 'server' ? <p className="rounded-lg bg-zinc-100 px-3 py-2 text-[13px] text-zinc-600">Version history is available on the website.</p>
-                            : versions === null ? <Spinner /> : !versions.length ? <p className="text-[13px] text-zinc-500">No earlier versions yet.</p> : (
-                              <ul className="divide-y divide-zinc-200 rounded-lg border border-zinc-200 bg-white">
-                                {versions.map(v => {
-                                  const m = v.id.match(/^(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})(\d{2})$/);
-                                  const date = m ? new Date(Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +m[6])) : null;
-                                  return (
-                                    <li key={v.id} className="flex items-center gap-2 px-3 py-2">
-                                      <History className="size-4 text-zinc-400" />
-                                      <span className="flex-1 text-[13px]">{date ? date.toLocaleString(undefined, { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' }) : v.id}</span>
-                                      <Button size="sm" variant="ghost" onClick={() => void restoreVersion(v.id)}>Restore</Button>
-                                    </li>
-                                  );
-                                })}
-                              </ul>
-                            )}
-                        </div>
-                      )}
+                      <PagePanel model={active.model} onChange={fn => p.updateModel(active.file, fn)} />
                     </div>
                   </aside>
                 )}
@@ -774,6 +795,10 @@ export function ProjectScreen({ store, project, file, onNavigate, onClose }: { s
             </>
           )}
         </div>
+        {historyOn && historyOpen && (
+          <HistoryPanel project={project} head={head} onHead={setHead} tick={p.savedTick} activeFile={view === 'doc' ? activeFile : undefined}
+            run={runHistory} onPreview={(v, f) => setPreviewV({ v, file: f || (view === 'doc' ? activeFile : undefined) })} onClose={() => setHistoryOpen(false)} />
+        )}
         {preview && docs.length > 0 && (
           <PrintPreview docs={docs.map(d => ({ file: d.file, label: shortDocLabel(d.file), model: d.model }))} activeFile={active?.file}
             onPick={f => (view === 'canvas' ? activate(f) : switchTo(f))} onClose={() => setPreview(false)} />
@@ -782,6 +807,11 @@ export function ProjectScreen({ store, project, file, onNavigate, onClose }: { s
       <div className="flex items-center border-t border-zinc-200 bg-white px-3 py-1.5 md:hidden">{statusEl}</div>
       <input ref={uploadRef} type="file" multiple accept={ACCEPTED_UPLOADS} className="hidden" onChange={e => { void onUpload(e.target.files); e.target.value = ''; }} />
 
+      <VersionPreview project={project} version={previewV?.v || null} initialFile={previewV?.file} files={docs.map(d => d.file)}
+        onClose={() => setPreviewV(null)} onRestore={(v, f) => void restoreFromPreview(v, f)} />
+      <VersionInfoDialog open={!!nameV} onClose={() => setNameV(null)} title={nameV ? `Tag v${nameV.code}` : ''} submit="Save"
+        initial={nameV ? { tag: nameV.tag, desc: nameV.desc } : undefined}
+        onSubmit={async (tag, desc) => { if (nameV) { await studioApi.historyInfo(project, nameV.n, tag, desc); toast(`Updated v${nameV.code}`); } }} />
       <DetectDialog summary={detection} open={!!detection} onClose={() => setDetection(null)} onApply={applyDetection} />
       <RenameDialog open={!!renameDoc} onClose={() => setRenameDoc(null)} initial={(renameDoc || '').replace(/\.html$/i, '')} title="Rename document"
         onSubmit={async name => {

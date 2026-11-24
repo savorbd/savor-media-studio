@@ -72,6 +72,20 @@ class SMS_Rest {
 			'callback'            => array(__CLASS__, 'version'),
 			'permission_callback' => $read,
 		));
+		foreach (array('' => 'history_list', '/version' => 'history_version', '/preview' => 'history_preview') as $r => $cb) {
+			register_rest_route(self::NS, '/history' . $r, array(
+				'methods'             => 'GET',
+				'callback'            => array(__CLASS__, $cb),
+				'permission_callback' => $read,
+			));
+		}
+		foreach (array('commit', 'info', 'restore', 'step', 'undo') as $r) {
+			register_rest_route(self::NS, '/history/' . $r, array(
+				'methods'             => 'POST',
+				'callback'            => array(__CLASS__, 'history_' . $r),
+				'permission_callback' => $write,
+			));
+		}
 		register_rest_route(self::NS, '/translate', array(
 			'methods'             => 'POST',
 			'callback'            => array(__CLASS__, 'translate'),
@@ -178,6 +192,70 @@ class SMS_Rest {
 			return $path;
 		}
 		return self::respond(self::storage()->read_version($path, $request->get_param('id')));
+	}
+
+	/* ---- Version history (one log per project) ---- */
+
+	private static function hp($value) {
+		self::storage();
+		return SMS_Project::require_project($value);
+	}
+
+	public static function history_list(WP_REST_Request $request) {
+		$p = self::hp($request->get_param('project'));
+		return is_wp_error($p) ? $p : self::respond(SMS_History::listing($p, (int) ($request->get_param('limit') ?: 100), (int) $request->get_param('before')));
+	}
+
+	public static function history_version(WP_REST_Request $request) {
+		$p = self::hp($request->get_param('project'));
+		return is_wp_error($p) ? $p : self::respond(SMS_History::version_detail($p, (int) $request->get_param('n')));
+	}
+
+	public static function history_preview(WP_REST_Request $request) {
+		$p = self::hp($request->get_param('project'));
+		if (is_wp_error($p)) {
+			return $p;
+		}
+		$f = SMS_Project::doc_path($p, $request->get_param('file'));
+		return is_wp_error($f) ? $f : self::respond(SMS_History::preview($p, (int) $request->get_param('n'), basename($f)));
+	}
+
+	private static function str($body, $key) {
+		return isset($body[$key]) && is_string($body[$key]) ? $body[$key] : null;
+	}
+
+	public static function history_commit(WP_REST_Request $request) {
+		$b = $request->get_json_params();
+		$p = self::hp($b['project'] ?? null);
+		return is_wp_error($p) ? $p : self::respond(SMS_History::commit($p, self::str($b, 'tag'), self::str($b, 'description')));
+	}
+
+	public static function history_info(WP_REST_Request $request) {
+		$b = $request->get_json_params();
+		$p = self::hp($b['project'] ?? null);
+		return is_wp_error($p) ? $p : self::respond(SMS_History::set_info($p, (int) ($b['n'] ?? 0), self::str($b, 'tag'), self::str($b, 'description')));
+	}
+
+	public static function history_restore(WP_REST_Request $request) {
+		$b = $request->get_json_params();
+		$p = self::hp($b['project'] ?? null);
+		if (is_wp_error($p)) {
+			return $p;
+		}
+		$files = array_values(array_filter((array) ($b['files'] ?? array()), function ($f) { return is_string($f) && preg_match('/^[^\/]+\.html$/i', $f); }));
+		return self::respond(SMS_History::restore($p, (int) ($b['n'] ?? 0), $files));
+	}
+
+	public static function history_step(WP_REST_Request $request) {
+		$b = $request->get_json_params();
+		$p = self::hp($b['project'] ?? null);
+		return is_wp_error($p) ? $p : self::respond(SMS_History::step($p, 'forward' === ($b['direction'] ?? '') ? 'forward' : 'back'));
+	}
+
+	public static function history_undo(WP_REST_Request $request) {
+		$b = $request->get_json_params();
+		$p = self::hp($b['project'] ?? null);
+		return is_wp_error($p) ? $p : self::respond(SMS_History::undo($p, (int) ($b['n'] ?? 0), (string) ($b['change'] ?? '')));
 	}
 
 	public static function translate(WP_REST_Request $request) {
