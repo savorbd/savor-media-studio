@@ -106,7 +106,7 @@ class SMS_Admin {
 				The studio is public to anyone who knows this address (no login) and is hidden from search engines.
 				It is not linked from your website. Each project is a folder of HTML documents in <code>wp-content/uploads/savor-media-studio/</code>,
 				which is blocked from direct download. Deleted files are kept in its <code>trash</code> folder for 30 days,
-				and each file keeps its last 30 automatic versions.
+				and every project keeps its full version history (in the <code>history</code> folder).
 			</p>
 			<?php
 			?>

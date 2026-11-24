@@ -23,6 +23,20 @@ export interface StudioFile { path: string; content: string; etag: string; modif
 export interface SaveResult { path: string; etag: string; modified: number; size: number }
 export interface StudioVersion { id: string; modified: number; size: number }
 
+/* ---------- Project version history ---------- */
+export type HistorySource = 'studio' | 'mcp' | 'restore' | 'import';
+export interface HistoryFile { file: string; op: 'created' | 'deleted' | 'changed' }
+export interface HistoryVersion {
+  n: number; code: string; time: string; end: string; source: HistorySource; tag: string; desc: string; open: boolean;
+  files: HistoryFile[]; restored_from?: number; restored_from_code?: string; undo_of?: number; undo_of_code?: string; step?: boolean;
+}
+export interface HistoryHead { n: number; code: string; effective: number; effective_code: string; can_back: boolean; can_forward: boolean; count: number }
+export interface HistoryHunk {
+  id: string; kind: 'body' | 'setting' | 'value' | 'file'; label: string; before?: string; after?: string; text?: string; key?: string; op?: string; at?: number;
+}
+export interface HistoryChange { file: string; op: HistoryFile['op']; hunks: HistoryHunk[]; values_only?: boolean }
+export interface HistoryResult { version: HistoryVersion | null; head: HistoryHead; changed?: string[]; message?: string | null }
+
 export class StudioError extends Error {
   constructor(message: string, public status: number, public code?: string, public data?: any) { super(message); }
 }
@@ -65,6 +79,15 @@ export const studioApi = {
   move: (from: string, to: string) => call<{ from: string; to: string }>('POST', 'move', { body: { from, to } }),
   versions: (path: string) => call<{ versions: StudioVersion[] }>('GET', 'versions', { query: { path } }).then(r => r.versions),
   version: (path: string, id: string) => call<{ content: string }>('GET', 'version', { query: { path, id } }),
+  history: (project: string, before = 0, limit = 100) =>
+    call<{ head: HistoryHead; versions: HistoryVersion[]; more: boolean }>('GET', 'history', { query: { project, limit: String(limit), ...(before ? { before: String(before) } : {}) } }),
+  historyVersion: (project: string, n: number) => call<{ version: HistoryVersion; changes: HistoryChange[]; head: HistoryHead }>('GET', 'history/version', { query: { project, n: String(n) } }),
+  historyPreview: (project: string, n: number, file: string) => call<{ html: string; changes: number; deleted?: boolean }>('GET', 'history/preview', { query: { project, n: String(n), file } }),
+  historyCommit: (project: string, tag?: string, description?: string) => call<HistoryResult & { new_changes: boolean }>('POST', 'history/commit', { body: { project, tag, description } }),
+  historyInfo: (project: string, n: number, tag: string, description: string) => call<{ version: HistoryVersion }>('POST', 'history/info', { body: { project, n, tag, description } }),
+  historyRestore: (project: string, n: number, files?: string[]) => call<HistoryResult>('POST', 'history/restore', { body: { project, n, files }, timeout: 60000 }),
+  historyStep: (project: string, direction: 'back' | 'forward') => call<HistoryResult>('POST', 'history/step', { body: { project, direction }, timeout: 60000 }),
+  historyUndo: (project: string, n: number, change: string) => call<HistoryResult>('POST', 'history/undo', { body: { project, n, change }, timeout: 60000 }),
   translate: (fields: { id: string; text: string }[], passcode?: string, mode: 'fields' | 'html' = 'fields', provider?: string) =>
     call<{ translations: { id: string; text: string }[]; provider?: string; model?: string }>('POST', 'translate', { body: { fields, mode, provider }, headers: passcode ? { 'X-Studio-Passcode': passcode } : {}, timeout: 150000 }),
 };
