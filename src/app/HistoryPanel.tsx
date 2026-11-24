@@ -238,6 +238,9 @@ export function HistoryPanel({ project, info, onInfo, tick, scope, onScope, run,
   const [more, setMore] = useState(false);
   const [error, setError] = useState('');
   const [open, setOpen] = useState<number | null>(null);
+  const openRef = useRef<number | null>(null);
+  openRef.current = open;
+  const fetchDetailRef = useRef<(n: number, force?: boolean) => Promise<void>>(async () => {});
   const [details, setDetails] = useState<Record<string, TrackChanges[]>>({});
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState<Filter>('all');
@@ -254,7 +257,12 @@ export function HistoryPanel({ project, info, onInfo, tick, scope, onScope, run,
     try {
       const r = await studioApi.history<AnyVersion>(project, scopeKey, 0, 300);
       setVersions(r.versions); setMore(r.more); onInfo({ head: r.head, tracks: r.tracks }); setError('');
-      setDetails(d => { const n = { ...d }; for (const v of r.versions) if (isProjectVersion(v) && v.open) delete n[`${scopeKey}:${v.n}`]; return n; });
+      // A version still collecting changes may have grown: reload its details (now, if it is expanded).
+      const grown = r.versions.filter(v => isProjectVersion(v) && v.open).map(vnum);
+      if (grown.length) {
+        setDetails(d => { const n = { ...d }; for (const g of grown) delete n[`${scopeKey}:${g}`]; return n; });
+        if (openRef.current !== null && grown.includes(openRef.current)) void fetchDetailRef.current(openRef.current, true);
+      }
     } catch (e: any) { setError(e?.message || 'Could not load the history.'); setVersions(v => v || []); }
   }, [project, scopeKey]);
   useEffect(() => { setVersions(null); setOpen(null); setPicking(null); }, [scopeKey]);
@@ -272,6 +280,7 @@ export function HistoryPanel({ project, info, onInfo, tick, scope, onScope, run,
     try { const r = await studioApi.historyVersion(project, n, scopeKey); setDetails(d => ({ ...d, [key]: r.changes })); }
     catch (e: any) { toast('Could not load this version', { tone: 'error', description: e?.message }); }
   };
+  fetchDetailRef.current = fetchDetail;
   const toggle = (n: number) => {
     if (picking !== null) { if (n !== picking) onCompare(scope, Math.min(picking, n), Math.max(picking, n)); setPicking(null); return; }
     setOpen(o => (o === n ? null : n)); void fetchDetail(n);
@@ -426,7 +435,8 @@ export function HistoryPanel({ project, info, onInfo, tick, scope, onScope, run,
                           <div className="flex flex-wrap items-center gap-1 pt-0.5">
                             <Button size="sm" className="h-6 px-2 text-[12px]" onClick={() => onPreview(scope, v, prevOf(v))}><Eye className="size-3.5" />Preview</Button>
                             <Button size="sm" className="h-6 px-2 text-[12px]" onClick={() => setPicking(n)} title="Compare with any other version"><GitCompareArrows className="size-3.5" />Compare</Button>
-                            <Button size="sm" className="h-6 px-2 text-[12px]" disabled={busy} onClick={() => void restore(v)}><RotateCcw className="size-3.5" />Restore</Button>
+                            {now ? <span className="px-1 text-[11.5px] font-medium text-indigo-600" title="The pages already look like this version">Current version</span>
+                              : <Button size="sm" className="h-6 px-2 text-[12px]" disabled={busy} onClick={() => void restore(v)}><RotateCcw className="size-3.5" />{busy ? 'Restoring…' : `Restore v${v.code}`}</Button>}
                             {busy && <Loader2 className="ml-auto size-3.5 animate-spin text-zinc-400" />}
                           </div>
                         </div>
