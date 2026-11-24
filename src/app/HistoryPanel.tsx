@@ -199,7 +199,7 @@ export function HistoryPanel({ project, head, onHead, tick, activeFile, run, onP
     setBusy(true);
     try {
       const r = await run(label, fn);
-      if (r) { onHead(r.head); await load(); if (r.version) setOpen(r.version.n); }
+      if (r) { onHead(r.head); await load(); if (r.version) { setOpen(r.version.n); void fetchDetail(r.version.n, true); } }
     } finally { setBusy(false); }
   };
 

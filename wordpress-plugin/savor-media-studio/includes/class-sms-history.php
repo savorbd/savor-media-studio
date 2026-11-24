@@ -249,6 +249,12 @@ class SMS_History {
 					$idx = $cnt - 1;
 				}
 			}
+			$amend = false;
+			if (null === $idx && !$ctx && $cnt && self::slots_only($file, $before, $after)) {
+				// Only shared-value text was re-filled (e.g. the studio re-rendering a slot): no new version for that.
+				$idx   = $cnt - 1;
+				$amend = true;
+			}
 			if (null === $idx) {
 				foreach ($log['versions'] as $i => $v) {
 					$log['versions'][$i]['sealed'] = true;
@@ -272,7 +278,9 @@ class SMS_History {
 				unset($files[$file]);
 			}
 			$v['files'] = $files ? $files : new stdClass();
-			$v['end']   = $now;
+			if (!$amend) {
+				$v['end'] = $now;
+			}
 			if (!$files) {
 				$n = $v['n'];
 				unset($v);
@@ -298,6 +306,23 @@ class SMS_History {
 				self::unlock($h);
 			}
 		}
+	}
+
+	/** True when two versions of a document differ only in the text of shared-value slots. */
+	private static function slots_only($file, $before, $after) {
+		if (null === $before || null === $after || !preg_match('/\.html$/i', $file)) {
+			return false;
+		}
+		$mb = SMS_Doc::parse($before, 'x');
+		$ma = SMS_Doc::parse($after, 'x');
+		foreach (array('title', 'lang', 'margins', 'font', 'fontSize') as $k) {
+			if (wp_json_encode($mb[$k]) !== wp_json_encode($ma[$k])) {
+				return false;
+			}
+		}
+		$kb = array_map(function ($b) { return $b['key']; }, self::blocks($mb['body']));
+		$ka = array_map(function ($b) { return $b['key']; }, self::blocks($ma['body']));
+		return $kb === $ka;
 	}
 
 	private static function referenced($log, $hash) {
