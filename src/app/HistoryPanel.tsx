@@ -554,7 +554,7 @@ export function projectPreview(v: ProjectVersion, tracks: TrackHead[], opts: { i
     .map(t => ({ track: t.track, label: trackChip(t), k: v.heads[t.track], against: moves.has(t.track) ? (moves.get(t.track)!.from ?? 0) : v.heads[t.track], changed: moves.has(t.track) }));
   return {
     title: <span className="flex items-center gap-2">Project v{v.code}{v.tag && <TagPill tag={v.tag} />}<span className="text-[13px] font-normal text-zinc-500">{fullTime(v.end)}{v.author ? ` · ${v.author}` : ''}</span></span>,
-    subtitle: v.desc || undefined, tabs, initial: opts.initial, onRestore: opts.onRestore, restoreLabel: `Restore project to v${v.code}`,
+    subtitle: v.desc || undefined, tabs, initial: opts.initial && moves.has(opts.initial) ? opts.initial : undefined, onRestore: opts.onRestore, restoreLabel: `Restore project to v${v.code}`,
   };
 }
 
