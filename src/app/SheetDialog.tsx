@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { ArrowDown, ArrowUp, ChevronDown, Copy, GripVertical, Languages, Mic, Plus, Redo2, Sheet, Sparkles, Trash2, Undo2, X } from 'lucide-react';
 import { Bi, EN_PREFIXES, Guest, TextKey, colorFor, formatDate, formatTime, hostIndex, newId, ordinal, toBnDigits } from '../editor/values';
@@ -14,7 +14,28 @@ import type { ProjectState } from './useProject';
 const cell = 'h-7 w-full min-w-0 rounded border border-transparent bg-transparent px-1.5 text-[12.5px] text-zinc-900 placeholder:text-zinc-300 hover:border-zinc-200 focus:border-indigo-400 focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-100';
 const bnCell = cn(cell, "font-['Hind_Siliguri']");
 const th = 'sticky top-0 z-10 border-b border-zinc-200 bg-zinc-50 px-1.5 py-1.5 text-left text-[11px] font-semibold uppercase tracking-wide text-zinc-500';
-const td = 'border-b border-zinc-100 px-0.5 py-0.5 align-middle';
+const td = 'border-b border-zinc-100 px-0.5 py-0.5 align-top';
+
+/** A text cell that wraps and grows so the whole value is always visible. */
+function WrapCell({ value, onChange, className, ...rest }: { value: string; onChange: (s: string) => void; className?: string } & Omit<React.TextareaHTMLAttributes<HTMLTextAreaElement>, 'value' | 'onChange'>) {
+  const ref = useRef<HTMLTextAreaElement>(null);
+  const fit = () => { const el = ref.current; if (el) { el.style.height = 'auto'; el.style.height = `${el.scrollHeight + 2}px`; } };
+  useLayoutEffect(fit, [value]);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    let w = el.clientWidth;
+    const ro = new ResizeObserver(() => { if (el.clientWidth !== w) { w = el.clientWidth; fit(); } });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+  return (
+    <textarea ref={ref} rows={1} value={value} {...rest}
+      onChange={e => onChange(e.target.value.replace(/\r?\n/g, ' '))}
+      onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); (e.target as HTMLTextAreaElement).blur(); } }}
+      className={cn(className, 'block h-auto resize-none overflow-hidden whitespace-pre-wrap break-words py-1 leading-snug')} />
+  );
+}
 
 const Swatch = ({ k }: { k: string }) => <span className="inline-block size-2.5 shrink-0 rounded-[3px] ring-1 ring-inset ring-black/10" style={{ background: colorFor(k) }} />;
 
@@ -95,8 +116,8 @@ export function SheetDialog({ open, onClose, p, selected, setSelected, onTransla
     return {
       key, label,
       check: b?.noTranslate ? null : <input type="checkbox" aria-label={`Select ${label} for translation`} checked={sel('text:' + key)} onChange={e => toggle('text:' + key, e.target.checked)} className="size-3.5 accent-indigo-600" />,
-      en: <input value={b?.en || ''} placeholder={ph} aria-label={`${label} English`} onChange={e => setText(key, 'en', e.target.value)} className={cell} />,
-      bn: <div className="flex min-w-0 items-center gap-1"><input lang="bn" value={b?.bn || ''} aria-label={`${label} Bangla`} onChange={e => setText(key, 'bn', e.target.value)} className={bnCell} /><BnTag b={b} /></div>,
+      en: <WrapCell value={b?.en || ''} placeholder={ph} aria-label={`${label} English`} onChange={x => setText(key, 'en', x)} className={cell} />,
+      bn: <div className="flex min-w-0 items-start gap-1"><WrapCell lang="bn" value={b?.bn || ''} aria-label={`${label} Bangla`} onChange={x => setText(key, 'bn', x)} className={bnCell} /><span className="mt-1.5"><BnTag b={b} /></span></div>,
       noTr: <NoTr on={!!b?.noTranslate} onChange={on => setNoTranslate(key, on)} label={label} />,
     };
   };
@@ -182,11 +203,11 @@ export function SheetDialog({ open, onClose, p, selected, setSelected, onTransla
           </div>
         </td>
         <td className={cn(td, 'w-24')}><TokensCell list={g.prefixes} kind="prefix" lock={lock} label={`${label} prefix`} onChange={l => updGuest(g.id, x => ({ ...x, prefixes: l }))} /></td>
-        <td className={td}><input value={g.name.en} placeholder="Full name" aria-label={`${label} name English`} onChange={e => updGuest(g.id, x => ({ ...x, name: lock ? { ...x.name, en: e.target.value } : withEn(x.name, e.target.value, 'name') }))} className={cn(cell, 'font-semibold')} /></td>
-        <td className={td}><input lang="bn" value={g.name.bn} placeholder="পূর্ণ নাম" aria-label={`${label} name Bangla`} onChange={e => updGuest(g.id, x => ({ ...x, name: withBn(x.name, e.target.value) }))} className={cn(bnCell, 'font-semibold')} /></td>
+        <td className={td}><WrapCell value={g.name.en} placeholder="Full name" aria-label={`${label} name English`} onChange={t => updGuest(g.id, x => ({ ...x, name: lock ? { ...x.name, en: t } : withEn(x.name, t, 'name') }))} className={cn(cell, 'font-semibold')} /></td>
+        <td className={td}><WrapCell lang="bn" value={g.name.bn} placeholder="পূর্ণ নাম" aria-label={`${label} name Bangla`} onChange={t => updGuest(g.id, x => ({ ...x, name: withBn(x.name, t) }))} className={cn(bnCell, 'font-semibold')} /></td>
         <td className={cn(td, 'w-20')}><TokensCell list={g.postfixes} kind="postfix" lock={lock} label={`${label} postfix`} onChange={l => updGuest(g.id, x => ({ ...x, postfixes: l }))} /></td>
-        <td className={td}><input value={g.designation.en} placeholder="Title, organization" aria-label={`${label} designation English`} onChange={e => updGuest(g.id, x => ({ ...x, designation: lock ? { ...x.designation, en: e.target.value } : withEn(x.designation, e.target.value, 'designation') }))} title={g.designation.en} className={cell} /></td>
-        <td className={td}><input lang="bn" value={g.designation.bn} placeholder="পদবি, প্রতিষ্ঠান" aria-label={`${label} designation Bangla`} onChange={e => updGuest(g.id, x => ({ ...x, designation: withBn(x.designation, e.target.value) }))} title={g.designation.bn} className={bnCell} /></td>
+        <td className={td}><WrapCell value={g.designation.en} placeholder="Title, organization" aria-label={`${label} designation English`} onChange={t => updGuest(g.id, x => ({ ...x, designation: lock ? { ...x.designation, en: t } : withEn(x.designation, t, 'designation') }))} className={cell} /></td>
+        <td className={td}><WrapCell lang="bn" value={g.designation.bn} placeholder="পদবি, প্রতিষ্ঠান" aria-label={`${label} designation Bangla`} onChange={t => updGuest(g.id, x => ({ ...x, designation: withBn(x.designation, t) }))} className={bnCell} /></td>
         <td className={cn(td, 'w-12 text-center')}>
           {i !== null && (
             <label title="Host: gives the welcome speech in the MC Script" className="flex cursor-pointer justify-center">
@@ -209,9 +230,9 @@ export function SheetDialog({ open, onClose, p, selected, setSelected, onTransla
   };
 
   return createPortal(
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-zinc-950/40 p-4 backdrop-blur-[2px]" onMouseDown={e => { if (e.target === e.currentTarget) onClose(); }}>
+    <div className="fixed inset-0 z-50 flex bg-white">
       <datalist id="sv-prefixes-sheet">{EN_PREFIXES.map(x => <option key={x} value={x} />)}</datalist>
-      <div role="dialog" aria-modal="true" aria-label="Shared values sheet" className="flex h-[90vh] w-[min(1400px,96vw)] animate-in flex-col overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-pop">
+      <div role="dialog" aria-modal="true" aria-label="Shared values sheet" className="flex size-full flex-col overflow-hidden bg-white">
         <div className="flex items-center gap-2 border-b border-zinc-200 px-4 py-2">
           <Sheet className="size-4 text-indigo-600" />
           <h2 className="text-[14px] font-semibold text-zinc-950">Shared values</h2>
