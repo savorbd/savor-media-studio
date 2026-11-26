@@ -29,8 +29,8 @@ function NoTr({ on, onChange, label }: { on: boolean; onChange: (v: boolean) => 
 function BnTag({ b }: { b?: Bi }) {
   if (!b?.bn || b.noTranslate) return null;
   return b.bnCustom
-    ? <span title="Bangla typed by hand" className="rounded-full bg-amber-50 px-1 text-[9.5px] font-medium text-amber-800">custom</span>
-    : <span title="Translated automatically from English" className="rounded-full bg-emerald-50 px-1 text-[9.5px] font-medium text-emerald-700">auto</span>;
+    ? <span title="Bangla typed by hand" className="shrink-0 rounded-full bg-amber-50 px-1 text-[9.5px] font-medium text-amber-800">custom</span>
+    : <span title="Translated automatically from English" className="shrink-0 rounded-full bg-emerald-50 px-1 text-[9.5px] font-medium text-emerald-700">auto</span>;
 }
 
 /** "Mr., Dr." ⇄ prefix/postfix tokens (Bangla follows automatically unless locked). */
@@ -96,7 +96,7 @@ export function SheetDialog({ open, onClose, p, selected, setSelected, onTransla
       key, label,
       check: b?.noTranslate ? null : <input type="checkbox" aria-label={`Select ${label} for translation`} checked={sel('text:' + key)} onChange={e => toggle('text:' + key, e.target.checked)} className="size-3.5 accent-indigo-600" />,
       en: <input value={b?.en || ''} placeholder={ph} aria-label={`${label} English`} onChange={e => setText(key, 'en', e.target.value)} className={cell} />,
-      bn: <div className="flex items-center gap-1"><input lang="bn" value={b?.bn || ''} aria-label={`${label} Bangla`} onChange={e => setText(key, 'bn', e.target.value)} className={bnCell} /><BnTag b={b} /></div>,
+      bn: <div className="flex min-w-0 items-center gap-1"><input lang="bn" value={b?.bn || ''} aria-label={`${label} Bangla`} onChange={e => setText(key, 'bn', e.target.value)} className={bnCell} /><BnTag b={b} /></div>,
       noTr: <NoTr on={!!b?.noTranslate} onChange={on => setNoTranslate(key, on)} label={label} />,
     };
   };
@@ -108,8 +108,8 @@ export function SheetDialog({ open, onClose, p, selected, setSelected, onTransla
   });
   const dateRow = (key: 'eventDate' | 'endDate' | 'issueDate', label: string): Row => ({
     key, label,
-    en: <div className="flex items-center gap-2"><input type="date" value={v[key] || ''} aria-label={label} onChange={e => set(cur => ({ ...cur, [key]: e.target.value || null }), [key])} className={cn(cell, 'w-36')} /><span className="truncate text-[12px] text-zinc-500">{v[key] ? formatDate(v[key], 'en') : ''}</span></div>,
-    bn: <span lang="bn" className="px-1.5 font-['Hind_Siliguri'] text-[12.5px] text-zinc-500">{v[key] ? formatDate(v[key], 'bn') : ''}</span>,
+    en: <div className="flex items-center gap-2"><input type="date" value={v[key] || ''} aria-label={label} onChange={e => set(cur => ({ ...cur, [key]: e.target.value || null }), [key])} className={cn(cell, 'w-36 shrink-0')} /><span className="min-w-0 truncate text-[12px] text-zinc-500">{v[key] ? formatDate(v[key], 'en') : ''}</span></div>,
+    bn: <span lang="bn" className="block truncate px-1.5 font-['Hind_Siliguri'] text-[12.5px] text-zinc-500">{v[key] ? formatDate(v[key], 'bn') : ''}</span>,
   });
   const rows: (Row | string)[] = [
     'Exhibition',
@@ -121,8 +121,8 @@ export function SheetDialog({ open, onClose, p, selected, setSelected, onTransla
     dateRow('eventDate', 'Event date'),
     {
       key: 'eventTime', label: 'Inauguration time',
-      en: <div className="flex items-center gap-2"><input type="time" value={v.eventTime || ''} aria-label="Inauguration time" onChange={e => set(cur => ({ ...cur, eventTime: e.target.value || null }), ['eventTime'])} className={cn(cell, 'w-36')} /><span className="text-[12px] text-zinc-500">{v.eventTime ? formatTime(v.eventTime, 'en') : ''}</span></div>,
-      bn: <span lang="bn" className="px-1.5 font-['Hind_Siliguri'] text-[12.5px] text-zinc-500">{v.eventTime ? formatTime(v.eventTime, 'bn') : ''}</span>,
+      en: <div className="flex items-center gap-2"><input type="time" value={v.eventTime || ''} aria-label="Inauguration time" onChange={e => set(cur => ({ ...cur, eventTime: e.target.value || null }), ['eventTime'])} className={cn(cell, 'w-36 shrink-0')} /><span className="min-w-0 truncate whitespace-nowrap text-[12px] text-zinc-500">{v.eventTime ? formatTime(v.eventTime, 'en') : ''}</span></div>,
+      bn: <span lang="bn" className="block truncate px-1.5 font-['Hind_Siliguri'] text-[12.5px] text-zinc-500">{v.eventTime ? formatTime(v.eventTime, 'bn') : ''}</span>,
     },
     dateRow('endDate', 'Last day'),
     dateRow('issueDate', 'Letter date'),
@@ -236,11 +236,11 @@ export function SheetDialog({ open, onClose, p, selected, setSelected, onTransla
 
         <div className="sv-scroll min-h-0 flex-1 overflow-auto px-3 pb-4">
           {/* Values */}
-          <table className="mt-2 w-full border-separate border-spacing-0">
-            <colgroup><col className="w-6" /><col className="w-44" /><col /><col /><col className="w-14" /><col className="w-12" /></colgroup>
+          <table className="mt-2 w-full min-w-[860px] table-fixed border-separate border-spacing-0">
+            <colgroup><col style={{ width: 28 }} /><col style={{ width: 170 }} /><col /><col /><col style={{ width: 56 }} /><col style={{ width: 48 }} /></colgroup>
             <thead><tr>
               <th className={th} /><th className={th}>Value</th><th className={th}>English</th><th className={th}>বাংলা</th>
-              <th className={cn(th, 'text-center')} title="Don't translate">No tr.</th><th className={cn(th, 'text-center')}>Used</th>
+              <th className={cn(th, 'text-center normal-case')} title="Don't translate">Don't tr.</th><th className={cn(th, 'text-center')}>Used</th>
             </tr></thead>
             <tbody>
               {rows.map(r => typeof r === 'string'
@@ -248,7 +248,7 @@ export function SheetDialog({ open, onClose, p, selected, setSelected, onTransla
                 : (
                   <tr key={r.key} className="hover:bg-zinc-50/80">
                     <td className={cn(td, 'text-center')}>{r.check}</td>
-                    <td className={cn(td, 'whitespace-nowrap')}><span className="flex items-center gap-1.5 px-1 text-[12.5px] font-medium text-zinc-700"><Swatch k={r.key} />{r.label}</span></td>
+                    <td className={cn(td, 'whitespace-nowrap')}><span className="flex items-center gap-1.5 truncate px-1 text-[12.5px] font-medium text-zinc-700"><Swatch k={r.key} />{r.label}</span></td>
                     <td className={td}>{r.en}</td>
                     <td className={td}>{r.bn}</td>
                     <td className={td}>{r.noTr}</td>
@@ -263,10 +263,14 @@ export function SheetDialog({ open, onClose, p, selected, setSelected, onTransla
             <h3 className="text-[12px] font-semibold uppercase tracking-wide text-zinc-500">Guests</h3>
             <span className="text-[11.5px] text-zinc-400">Chief guest, then special guests in printed order · drag ⋮⋮ to reorder · ◉ = host (welcome speech)</span>
           </div>
-          <table className="mt-1 w-full border-separate border-spacing-0">
+          <table className="mt-1 w-full min-w-[1120px] table-fixed border-separate border-spacing-0">
+            <colgroup>
+              <col style={{ width: 28 }} /><col style={{ width: 64 }} /><col style={{ width: 96 }} /><col style={{ width: '16%' }} /><col style={{ width: '16%' }} />
+              <col style={{ width: 80 }} /><col /><col /><col style={{ width: 48 }} /><col style={{ width: 56 }} /><col style={{ width: 132 }} />
+            </colgroup>
             <thead><tr>
               <th className={th} /><th className={th}>#</th><th className={th}>Prefix</th><th className={th}>Name</th><th className={th}>নাম</th><th className={th}>Postfix</th>
-              <th className={th}>Designation</th><th className={th}>পদবি</th><th className={cn(th, 'text-center')}>Host</th><th className={cn(th, 'text-center')} title="Don't translate">No tr.</th><th className={th} />
+              <th className={th}>Designation</th><th className={th}>পদবি</th><th className={cn(th, 'text-center')}>Host</th><th className={cn(th, 'text-center normal-case')} title="Don't translate">Don't tr.</th><th className={th} />
             </tr></thead>
             <tbody>
               {v.chiefGuest ? guestRow(v.chiefGuest, null) : (
