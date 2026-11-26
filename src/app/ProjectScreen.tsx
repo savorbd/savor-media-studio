@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertTriangle, ArrowLeft, Check, ChevronDown, Cloud, CloudOff, Code2, Copy, Download, Eye, EyeOff, FileCode2, FileDown, FilePlus2, FileText,
   FileType2, History, LayoutGrid, Loader2, MoreHorizontal, PanelLeft, PanelRight, Pencil, Plus, Printer, RotateCcw, Trash2, Upload, X,
-  UnfoldVertical, Square, Underline, PaintBucket, Mic,
+  UnfoldVertical, Square, Underline, PaintBucket, Mic, Table as TableIcon,
 } from 'lucide-react';
 import { Store } from '../editor/store';
 import { DocModel, FONTS, parseDoc, serializeDoc } from '../editor/doc';
@@ -23,6 +23,7 @@ import {
   trackChip, trackName, trackPreview, trackStepHead, useHistoryInfo, vcode,
 } from './HistoryPanel';
 import { HistoryCanvas } from './HistoryCanvas';
+import { SheetDialog } from './SheetDialog';
 import { Badge, Button, Dialog, IconButton, Input, Label, Menu, MenuItem, Segmented, Select, Spinner, cn, relativeTime, useConfirm, useToast, AppZoomControl } from '../ui/ui';
 import { EMPTY_STATE, EditorApi, ToolbarState, VisualEditor } from './VisualEditor';
 import { Toolbar } from './Toolbar';
@@ -471,6 +472,7 @@ export function ProjectScreen({ store, project, file, onNavigate, onClose }: { s
   };
 
   /* ---------- Version history ---------- */
+  const [sheetOpen, setSheetOpen] = useState(false);
   const historyOn = store.kind === 'server';
   const [historyOpen, setHistoryOpen] = useState(false);
   const [historyScope, setHistoryScope] = useState<HistoryScope>('project');
@@ -660,6 +662,7 @@ export function ProjectScreen({ store, project, file, onNavigate, onClose }: { s
           )}
           {historyOn && <VersionStepper arrows={false} head={projectStepHead(info)} open={historyOpen && historyScope === 'project'} busy={stepping === 'project'}
             onToggle={() => (historyOpen && historyScope === 'project' ? setHistoryOpen(false) : openHistory('project'))} onStep={d => void stepVersion(d)} />}
+          <Button size="sm" variant="outline" className="h-7 px-2" onClick={() => setSheetOpen(true)} title="All shared values in one table"><TableIcon className="size-3.5" />Sheet</Button>
           <AppZoomControl className="mr-1" />
           <Segmented label="View" value={view === 'canvas' ? 'canvas' : 'doc'} onChange={v => v === 'canvas' ? switchTo(undefined) : switchTo(activeFile || docs[0]?.file)} options={[
             { value: 'canvas', label: <><LayoutGrid className="size-3.5" /><span className="hidden lg:inline">All pages</span></>, title: 'See all four documents together' },
@@ -853,6 +856,8 @@ export function ProjectScreen({ store, project, file, onNavigate, onClose }: { s
         <HistoryCanvas project={project} info={info} scope={canvasScope} onScope={setCanvasScope} tick={p.savedTick}
           onPreview={setPreviewT} onRestore={(sc, v) => void restoreVersion(sc, v)} onClose={() => setCanvasScope(null)} />
       )}
+      <SheetDialog open={sheetOpen} onClose={() => setSheetOpen(false)} p={p} selected={selected} setSelected={setSelected}
+        onTranslate={translateSelected} providers={providers} translating={busy === 'translate'} />
       <VersionPreview project={project} target={previewT} onClose={() => setPreviewT(null)} />
       <VersionInfoDialog open={!!nameV} onClose={() => setNameV(null)} title={nameV ? `Project v${nameV.code}` : ''} submit="Save"
         initial={nameV ? { tag: nameV.tag, desc: nameV.desc, author: nameV.author } : undefined}
